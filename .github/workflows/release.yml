@@ -84,9 +84,6 @@ jobs:
           plutil -lint "${CONTENTS_DIR}/Info.plist"
           test -x "${MACOS_DIR}/${APP_NAME}"
 
-      - name: Ad-hoc sign app bundle
-        run: codesign --deep --force --sign - .build/AgentBar.app
-
       - name: Package zip
         run: ditto -c -k --keepParent .build/AgentBar.app AgentBar-macos.zip
 
