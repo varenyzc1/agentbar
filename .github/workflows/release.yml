@@ -15,7 +15,7 @@ env:
 jobs:
   build:
     name: Build macOS app
-    runs-on: macos-26-arm64
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -84,12 +84,95 @@ jobs:
 
       - name: Package dmg
         run: |
-          hdiutil create \
-            -volname AgentBar \
-            -srcfolder .build/AgentBar.app \
-            -ov \
-            -format UDZO \
-            AgentBar-macos.dmg
+          set -euo pipefail
+
+          # Install tools for DMG layout
+          brew install create-dmg
+          pip3 install Pillow
+
+          APP_NAME="AgentBar"
+          BG_W=660
+          BG_H=400
+
+          # --- Generate background image ---
+          python3 <<'PYEOF'
+          from PIL import Image, ImageDraw, ImageFont
+
+          W, H = 660, 400
+
+          # Gradient background: top #dce4f0 -> bottom #b8c4d4
+          img = Image.new("RGB", (W, H))
+          draw = ImageDraw.Draw(img)
+          for y in range(H):
+              t = y / H
+              r = int(220 * (1 - t) + 184 * t)
+              g = int(228 * (1 - t) + 196 * t)
+              b = int(240 * (1 - t) + 212 * t)
+              draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+          # Title text
+          title = "Drag AgentBar to Applications"
+          font = None
+          for path in ["/System/Library/Fonts/SFNSRounded.ttf",
+                       "/System/Library/Fonts/SFNS.ttf",
+                       "/System/Library/Fonts/Helvetica.ttc",
+                       "/System/Library/Fonts/SFCompact.ttf"]:
+              try:
+                  font = ImageFont.truetype(path, 20)
+                  break
+              except Exception:
+                  continue
+          if font is None:
+              font = ImageFont.load_default()
+
+          bbox = draw.textbbox((0, 0), title, font=font)
+          tw = bbox[2] - bbox[0]
+          draw.text(((W - tw) // 2, 30), title, fill=(70, 70, 80), font=font)
+
+          # Arrow: three chevrons pointing right (progressively darker)
+          cy = H // 2
+          shades = [(140, 145, 155), (120, 125, 135), (100, 110, 125)]
+          for i, dx in enumerate([0, 16, 32]):
+              draw.polygon(
+                  [(180 + dx, cy - 16), (200 + dx, cy), (180 + dx, cy + 16)],
+                  fill=shades[i],
+              )
+
+          img.save("/tmp/dmg_bg.png")
+          PYEOF
+
+          # --- Stage the DMG contents ---
+          STAGING=$(mktemp -d)
+          cp -R ".build/${APP_NAME}.app" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          # --- Window layout ---
+          ICON_L=180
+          ICON_R=480
+          ICON_CY=240
+          win_w=$(( ICON_R - ICON_L + 120 + 160 ))
+          win_h=$(( BG_H - 80 ))
+          off_x=$(( (BG_W - win_w) / 2 ))
+          off_y=40
+
+          # create-dmg positions = icon center − window offset
+          app_x=$(( ICON_L - off_x ))
+          app_y=$(( ICON_CY - off_y ))
+          app_drop_x=$(( ICON_R - off_x ))
+          app_drop_y=$(( ICON_CY - off_y ))
+
+          create-dmg \
+            --volname "$APP_NAME" \
+            --background /tmp/dmg_bg.png \
+            --window-pos 200 120 \
+            --window-size "$win_w" "$win_h" \
+            --icon-size 100 \
+            --icon "$APP_NAME.app" "$app_x" "$app_y" \
+            --app-drop-link "$app_drop_x" "$app_drop_y" \
+            "AgentBar-macos.dmg" \
+            "$STAGING"
+
+          rm -rf "$STAGING"
 
       - name: Upload release assets
         if: startsWith(github.ref, 'refs/tags/')
