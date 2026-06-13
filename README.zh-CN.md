@@ -49,6 +49,12 @@ brew install --cask agentbar
 xattr -cr /Applications/AgentBar.app
 ```
 
+升级到最新版本：
+
+```bash
+brew update && brew upgrade --cask agentbar
+```
+
 ### 从源码构建
 
 环境要求：

@@ -49,6 +49,12 @@ If clicking Settings does nothing, run the following command in Terminal to remo
 xattr -cr /Applications/AgentBar.app
 ```
 
+To upgrade to the latest version:
+
+```bash
+brew update && brew upgrade --cask agentbar
+```
+
 ### Build from source
 
 Requirements:
