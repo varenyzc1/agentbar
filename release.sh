@@ -48,7 +48,11 @@ hdiutil create \
   -format UDZO \
   AgentBar-macos.dmg
 
-# ── 5. Upload to GitHub Release ────────────────────────────────
+# ── 5. Create release & upload ──────────────────────────────────
+if ! gh release view "$TAG" >/dev/null 2>&1; then
+  echo "==> Creating GitHub Release ${TAG}..."
+  gh release create "$TAG" --title "$TAG" --generate-notes
+fi
 echo "==> Uploading to GitHub Release ${TAG}..."
 gh release upload "$TAG" \
   AgentBar-macos.zip \
@@ -60,7 +64,7 @@ echo "==> Updating Homebrew cask..."
 ZIP_URL="https://github.com/varenyzc1/agentbar/releases/download/${TAG}/AgentBar-macos.zip"
 SHA256="$(curl -fL "$ZIP_URL" | shasum -a 256 | awk '{print $1}')"
 
-git clone "https://github.com/varenyzc1/homebrew-agentbar.git" /tmp/agentbar-tap 2>/dev/null || true
+git clone git@github.com:varenyzc1/homebrew-agentbar.git /tmp/agentbar-tap 2>/dev/null || true
 cd /tmp/agentbar-tap && git pull
 perl -0pi -e "s/version \"[^\"]+\"/version \"${VERSION}\"/" Casks/agentbar.rb
 perl -0pi -e "s/sha256 \"[0-9a-f]+\"/sha256 \"${SHA256}\"/" Casks/agentbar.rb
