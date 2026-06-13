@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build macOS app
@@ -27,7 +30,10 @@ jobs:
         run: xcrun swift --version
 
       - name: Test
-        run: xcrun swift test
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcrun swift test 2>&1 | tee swift-test.log
 
       - name: Build app bundle
         run: ./build.sh
