@@ -2,6 +2,14 @@ import AgentBarCore
 import Foundation
 import ServiceManagement
 
+enum AppUpdateState: Equatable {
+    case idle
+    case checking
+    case upToDate(String)
+    case available(version: String, url: URL)
+    case failed(String)
+}
+
 enum CodexQuotaCardState: Equatable {
     case loading
     case ready(CodexQuotaSnapshot, isStale: Bool)
@@ -20,6 +28,8 @@ final class AgentBarModel: ObservableObject {
     @Published var statusMessage = "Ready"
     @Published var errorMessage: String?
     @Published var lastRefresh: Date?
+    @Published var updateState: AppUpdateState = .idle
+    @Published var installMethod: AppInstallMethod = .unknown
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
@@ -66,6 +76,7 @@ final class AgentBarModel: ObservableObject {
 
         loadCachedCodexQuota()
         scheduleRefresh()
+        Task { await refreshInstallMethod() }
         Task { await refresh(force: false) }
     }
 
@@ -226,6 +237,43 @@ final class AgentBarModel: ObservableObject {
             settings.launchAtLogin = previous
             errorMessage = PrivacyScrubber.scrub(error.localizedDescription)
             statusMessage = "Login item update failed"
+        }
+    }
+
+    func checkForUpdates() async {
+        guard updateState != .checking else { return }
+        updateState = .checking
+
+        do {
+            let latest = try await AppUpdateChecker().latestRelease()
+            let currentVersion = AppVersion.current.shortVersion
+            if AppVersion.isNewer(latest.version, than: currentVersion) {
+                updateState = .available(version: latest.version, url: latest.url)
+                statusMessage = "Update available"
+            } else {
+                updateState = .upToDate(currentVersion)
+                statusMessage = "AgentBar is up to date"
+            }
+            errorMessage = nil
+        } catch {
+            let message = PrivacyScrubber.scrub(error.localizedDescription)
+            updateState = .failed(message)
+            statusMessage = "Update check failed"
+        }
+    }
+
+    func refreshInstallMethod() async {
+        installMethod = await AppInstaller.currentInstallMethod()
+    }
+
+    func updateWithHomebrew() {
+        do {
+            try AppInstaller.openHomebrewUpdateTerminal()
+            statusMessage = "Homebrew update started"
+        } catch {
+            let message = PrivacyScrubber.scrub(error.localizedDescription)
+            updateState = .failed(message)
+            statusMessage = "Update failed"
         }
     }
 

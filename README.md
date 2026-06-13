@@ -2,65 +2,54 @@
 
 [中文](README.zh-CN.md)
 
-AgentBar is a macOS menu bar app for tracking local AI coding assistant usage. It scans local usage records, estimates token and cost totals, and shows quota progress directly in the menu bar.
+AgentBar is a local-first macOS menu bar app for tracking AI coding assistant usage. It scans usage records on your Mac, estimates token and cost totals, and shows local usage plus Codex quota progress directly in the menu bar.
 
-<img src="docs/assets/agentbar-dashboard.png" alt="AgentBar dashboard" width="360">
+<img src="docs/assets/agentbar-dashboard.png" alt="AgentBar dashboard" width="420">
 
-## Highlights
+## Why AgentBar
 
-- Menu bar quota indicators for 5-hour and 7-day rolling windows.
-- Local usage summaries for today, 7 days, and all time.
-- Source breakdowns for tools such as Codex and Claude Code.
-- Pricing-based cost estimates with configurable budgets.
-- Local-first data storage. Usage data is scanned and normalized on your Mac.
+- See today's, 7-day, and all-time AI coding usage without opening a dashboard.
+- Track Codex 5-hour and 7-day quota windows from the menu bar.
+- Estimate costs from local token records and configurable budgets.
+- Keep usage data local. AgentBar stores normalized records in a SQLite database on your Mac.
+- Install with Homebrew, download a release build, or build from source.
 
-<img src="docs/assets/agentbar-menu-bar.png" alt="AgentBar menu bar" width="220">
+## Install
 
-## Installation
-
-### Download a GitHub release
-
-1. Open the repository's **Releases** page.
-2. Download `AgentBar-macos.zip` from the latest release.
-3. Unzip it and move `AgentBar.app` to `/Applications`.
-4. Launch the app. If macOS shows "AgentBar.app is damaged", run the following command in Terminal to remove the quarantine flag, then open the app again:
-
-```bash
-xattr -cr /Applications/AgentBar.app
-```
-
-This repository includes a GitHub Actions workflow that builds the app and attaches the zip file whenever a version tag is pushed.
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-### Install with Homebrew
+### Homebrew
 
 ```bash
 brew tap varenyzc1/agentbar
 brew install --cask agentbar
 ```
 
-If clicking Settings does nothing, run the following command in Terminal to remove the quarantine flag, then relaunch the app:
-
-```bash
-xattr -cr /Applications/AgentBar.app
-```
-
-To upgrade to the latest version:
+To upgrade:
 
 ```bash
 brew update && brew upgrade --cask agentbar
 ```
 
-### Build from source
+AgentBar can detect Homebrew installs and open a Terminal-based Homebrew update flow from the Settings window when a newer release is available.
+
+### GitHub Release
+
+1. Open the repository's **Releases** page.
+2. Download `AgentBar-macos.zip` from the latest release.
+3. Unzip it and move `AgentBar.app` to `/Applications`.
+4. Launch AgentBar.
+
+If macOS says the app is damaged or Settings does not open, remove the quarantine flag and launch it again:
+
+```bash
+xattr -cr /Applications/AgentBar.app
+```
+
+### Build from Source
 
 Requirements:
 
 - macOS 14 or later
-- Xcode command line tools
+- Xcode Command Line Tools
 - Swift 5.9 or later
 
 ```bash
@@ -70,38 +59,95 @@ cd agentbar
 open .build/AgentBar.app
 ```
 
-For local development:
+## Features
 
-```bash
-swift test
-./debug.sh
-```
+<img src="docs/assets/agentbar-menu-bar.png" alt="AgentBar menu bar" width="220">
+
+- Menu bar display modes for quota, alerts, or local usage.
+- Codex quota indicators for 5-hour and 7-day rolling windows.
+- Local usage summaries for today, 7 days, and all time.
+- Source breakdowns for tools such as Codex and Claude Code.
+- 365-day activity heatmap.
+- Pricing-based cost estimates and budget settings.
+- Manual scan, cost recalculation, pricing reset, and launch-at-login controls.
+- Version display and update checks against GitHub Releases.
 
 ## Settings
 
-AgentBar lets you choose what appears in the menu bar, configure refresh behavior, set token and cost budgets, and rescan or recalculate local usage data.
+The Settings window lets you configure menu bar display, refresh behavior, launch at login, token and cost budgets, maintenance actions, and updates.
 
-<img src="docs/assets/agentbar-settings.png" alt="AgentBar settings" width="420">
+<img src="docs/assets/agentbar-settings.png" alt="AgentBar settings" width="560">
 
 ## How It Works
 
-AgentBar reads local usage files produced by supported coding assistants, parses provider/model/token information, and stores normalized records in a local SQLite database. The app then aggregates those records into rolling windows and summary ranges, applies a pricing catalog for cost estimates, and renders the result in a lightweight SwiftUI menu bar interface.
+AgentBar reads local usage files produced by supported coding assistants, parses provider, model, token, and timestamp information, and stores normalized records in a local SQLite database. The app aggregates those records into summary ranges and rolling windows, applies a pricing catalog for cost estimates, and renders the result in a lightweight SwiftUI menu bar interface.
 
-Quota information is kept separate from local usage totals. When available, AgentBar can refresh quota state and cache it locally so the menu bar stays useful between updates.
-
-## Repository Layout
-
-```text
-Sources/AgentBar/          SwiftUI app and menu bar UI
-Sources/AgentBarCore/      scanning, parsing, storage, pricing, aggregation
-Tests/AgentBarCoreTests/   core behavior tests
-Scripts/build_app.sh       release app bundle builder
-.github/workflows/         CI and release packaging
-```
+Quota information is separate from local usage totals. When available, AgentBar refreshes quota state over the network and caches it locally so the menu bar remains useful between refreshes.
 
 ## Privacy
 
-AgentBar is designed around local scanning and local storage. It does not need a server to calculate local usage summaries. Be careful when sharing screenshots because account names, usage totals, and quota timing may be visible.
+AgentBar is designed around local scanning and local storage. It does not need a server to calculate local usage summaries.
+
+Network access is used for:
+
+- Codex quota refreshes, when configured.
+- GitHub release checks for updates.
+- Homebrew updates, when you choose to update a Homebrew-installed app.
+
+Be careful when sharing screenshots because account names, usage totals, quota timing, and local paths may be visible.
+
+## Development
+
+Run tests:
+
+```bash
+swift test
+```
+
+Run a local debug build:
+
+```bash
+./debug.sh
+```
+
+Build the release app bundle:
+
+```bash
+./build.sh
+```
+
+Repository layout:
+
+```text
+.
+├── Package.swift                  Swift package manifest
+├── build.sh                       Local release app bundle shortcut
+├── debug.sh                       Local debug launcher
+├── release.sh                     Creates and pushes a version tag for CI
+├── LICENSE
+├── README.md
+├── README.zh-CN.md
+├── .github/
+│   └── workflows/
+│       └── release.yml            CI, release packaging, Homebrew cask update
+├── Scripts/
+│   └── build_app.sh               App bundle builder used locally and by CI
+├── Sources/
+│   ├── AgentBar/                  SwiftUI app, menu bar UI, settings, updates
+│   └── AgentBarCore/              scanning, parsing, storage, pricing, aggregation
+├── Tests/
+│   └── AgentBarCoreTests/         core behavior tests
+└── docs/
+    └── assets/                    README screenshots
+```
+
+## Release Process
+
+Releases are built by GitHub Actions when a `v*` tag is pushed. CI runs tests, builds the app bundle, uploads `AgentBar-macos.zip` and `AgentBar-macos.dmg` to GitHub Releases, and updates the Homebrew cask when `TAP_PAT` is configured.
+
+```bash
+./release.sh 0.1.0
+```
 
 ## Contributing
 
@@ -111,6 +157,8 @@ Issues and pull requests are welcome. Before opening a PR, please run:
 swift test
 ./build.sh
 ```
+
+For UI changes, include a screenshot or short note describing what changed in the menu bar panel or Settings window.
 
 ## License
 

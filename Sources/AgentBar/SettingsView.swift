@@ -12,21 +12,18 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 compactSection("Menu Bar") {
-                    HStack(alignment: .top, spacing: 8) {
-                        menuBarLabels
-                        menuBarControls
-                    }
+                    menuBarControls
                 }
 
                 HStack(alignment: .top, spacing: 12) {
-                    compactSection("Updates") {
-                        VStack(alignment: .leading, spacing: 8) {
+                    compactSection("Refresh") {
+                        VStack(alignment: .leading, spacing: 9) {
                             settingRow("Refresh", labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $refreshIntervalSeconds)
-                                        .textFieldStyle(.roundedBorder)
+                                        .textFieldStyle(AgentBarTextFieldStyle())
                                         .multilineTextAlignment(.trailing)
                                         .frame(width: 64)
 
@@ -39,19 +36,23 @@ struct SettingsView: View {
                             }
 
                             settingRow("Login", labelWidth: 58) {
-                                Toggle("", isOn: launchAtLoginBinding)
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
+                                Button {
+                                    launchAtLoginBinding.wrappedValue.toggle()
+                                } label: {
+                                    AgentBarSwitch(isOn: launchAtLoginBinding.wrappedValue)
+                                }
+                                .fixedSize()
+                                .buttonStyle(.plain)
                             }
                         }
                     }
 
                     compactSection("Budgets") {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 9) {
                             settingRow("Tokens", labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $monthlyTokenBudget)
-                                        .textFieldStyle(.roundedBorder)
+                                        .textFieldStyle(AgentBarTextFieldStyle())
                                         .frame(width: 98)
                                     Text("tokens")
                                         .foregroundStyle(.secondary)
@@ -61,7 +62,7 @@ struct SettingsView: View {
                             settingRow("Cost", labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $monthlyCostBudget)
-                                        .textFieldStyle(.roundedBorder)
+                                        .textFieldStyle(AgentBarTextFieldStyle())
                                         .frame(width: 98)
                                     Text("USD")
                                         .foregroundStyle(.secondary)
@@ -72,13 +73,14 @@ struct SettingsView: View {
                 }
 
                 compactSection("Maintenance") {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 10) {
                             Button {
                                 saveSettingsFromFields()
                             } label: {
                                 Label("Save", systemImage: "square.and.arrow.down")
                             }
+                            .buttonStyle(AgentBarCommandButtonStyle())
                             .keyboardShortcut("s", modifiers: [.command])
 
                             Button {
@@ -86,6 +88,7 @@ struct SettingsView: View {
                             } label: {
                                 Label("Scan", systemImage: "arrow.clockwise")
                             }
+                            .buttonStyle(AgentBarCommandButtonStyle())
                             .disabled(model.isRefreshing)
                         }
 
@@ -95,13 +98,43 @@ struct SettingsView: View {
                             } label: {
                                 Label("Recalculate", systemImage: "dollarsign.arrow.circlepath")
                             }
+                            .buttonStyle(AgentBarCommandButtonStyle())
 
                             Button {
                                 model.resetPricing()
                             } label: {
                                 Label("Reset pricing", systemImage: "arrow.counterclockwise")
                             }
+                            .buttonStyle(AgentBarCommandButtonStyle())
                         }
+                    }
+                }
+
+                compactSection("Updates") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 10) {
+                            Text(appVersionText)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+
+                            Spacer(minLength: 0)
+
+                            Button {
+                                Task { await model.checkForUpdates() }
+                            } label: {
+                                Label("Check", systemImage: "arrow.down.circle")
+                            }
+                            .buttonStyle(AgentBarCommandButtonStyle())
+                            .disabled(model.updateState == .checking)
+
+                            updateActionButton
+                        }
+
+                        Text(updateStatusText)
+                            .font(.caption2)
+                            .foregroundStyle(updateStatusColor)
+                            .lineLimit(2)
                     }
                 }
 
@@ -109,8 +142,12 @@ struct SettingsView: View {
             }
             .padding(16)
         }
+        .agentBarPanelBackground()
         .controlSize(.small)
         .onAppear(perform: loadFields)
+        .task {
+            await model.refreshInstallMethod()
+        }
         .onDisappear {
             autosaveTask?.cancel()
             saveSettingsFromFields()
@@ -157,6 +194,60 @@ struct SettingsView: View {
         "~/Library/Application Support/AgentBar/agentbar.db"
     }
 
+    private var appVersionText: String {
+        AppVersion.current.displayText
+    }
+
+    private var updateStatusText: String {
+        switch model.updateState {
+        case .idle:
+            return "\(model.installMethod.displayText) Check GitHub Releases for a newer version."
+        case .checking:
+            return "Checking for updates..."
+        case let .upToDate(version):
+            return "You are up to date on \(version). \(model.installMethod.displayText)"
+        case let .available(version, _):
+            if model.installMethod == .homebrew {
+                return "AgentBar \(version) is available. Update with Homebrew."
+            }
+            return "AgentBar \(version) is available. Open the release page to install it."
+        case let .failed(message):
+            return message
+        }
+    }
+
+    private var updateStatusColor: Color {
+        switch model.updateState {
+        case .available:
+            return AgentBarStyle.green
+        case .failed:
+            return AgentBarStyle.red
+        default:
+            return .secondary
+        }
+    }
+
+    @ViewBuilder
+    private var updateActionButton: some View {
+        if case let .available(_, url) = model.updateState {
+            if model.installMethod == .homebrew {
+                Button {
+                    model.updateWithHomebrew()
+                } label: {
+                    Label("Update", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(AgentBarCommandButtonStyle())
+            } else {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Open", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(AgentBarCommandButtonStyle())
+            }
+        }
+    }
+
     private var launchAtLoginBinding: Binding<Bool> {
         Binding(
             get: { model.settings.launchAtLogin },
@@ -174,78 +265,56 @@ struct SettingsView: View {
         )
     }
 
-    private var menuBarLabels: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            menuBarLabel("Display")
-
-            if model.settings.codexMenuBarMode == .iconOnly {
-                menuBarLabel("Usage metric")
-            }
-
-            if model.settings.codexMenuBarMode == .plan {
-                menuBarLabel("Labels")
-                ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
-                    menuBarLabel("\(key.label) quota")
-                }
-            }
-        }
-        .frame(width: 76, alignment: .leading)
-    }
-
     private var menuBarControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            menuBarControlRow {
-                Picker(selection: menuBarModeBinding) {
-                    ForEach(CodexMenuBarMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                } label: {
-                    EmptyView()
-                }
-                .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 9) {
+            settingRow("Display", labelWidth: 82) {
+                AgentBarSegmentedPicker(
+                    options: CodexMenuBarMode.allCases,
+                    selection: menuBarModeBinding,
+                    title: \.title
+                )
                 .frame(width: 260, alignment: .leading)
             }
 
             if model.settings.codexMenuBarMode == .iconOnly {
-                menuBarControlRow {
-                    Picker(selection: menuBarMetricBinding) {
-                        ForEach(MenuBarMetric.allCases) { metric in
-                            Text(metric.title).tag(metric)
-                        }
-                    } label: {
-                        EmptyView()
-                    }
-                    .pickerStyle(.segmented)
+                settingRow("Metric", labelWidth: 82) {
+                    AgentBarSegmentedPicker(
+                        options: MenuBarMetric.allCases,
+                        selection: menuBarMetricBinding,
+                        title: \.title
+                    )
                     .frame(width: 260, alignment: .leading)
                 }
             }
 
             if model.settings.codexMenuBarMode == .plan {
-                menuBarControlRow {
-                    Toggle(isOn: showQuotaLabelsBinding) {
-                        EmptyView()
+                settingRow("Labels", labelWidth: 82) {
+                    Button {
+                        showQuotaLabelsBinding.wrappedValue.toggle()
+                    } label: {
+                        AgentBarCheckbox(isOn: showQuotaLabelsBinding.wrappedValue)
                     }
-                        .toggleStyle(.checkbox)
-                        .fixedSize()
+                    .fixedSize()
+                    .buttonStyle(.plain)
                     Text("Show 5h / 7d")
+                        .foregroundStyle(.secondary)
                 }
 
                 ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
-                    menuBarControlRow {
-                        Toggle(isOn: enabledBinding(for: key)) {
-                            EmptyView()
-                        }
-                            .toggleStyle(.checkbox)
-                            .fixedSize()
-
-                        Picker(selection: basisBinding(for: key)) {
-                            ForEach(CodexQuotaPercentBasis.allCases) { basis in
-                                Text(basis.title).tag(basis)
-                            }
+                    settingRow("\(key.label) quota", labelWidth: 82) {
+                        Button {
+                            enabledBinding(for: key).wrappedValue.toggle()
                         } label: {
-                            EmptyView()
+                            AgentBarCheckbox(isOn: enabledBinding(for: key).wrappedValue)
                         }
-                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .buttonStyle(.plain)
+
+                        AgentBarSegmentedPicker(
+                            options: CodexQuotaPercentBasis.allCases,
+                            selection: basisBinding(for: key),
+                            title: \.title
+                        )
                         .frame(width: 154, alignment: .leading)
                         .disabled(!quotaItem(for: key).isEnabled)
                     }
@@ -280,19 +349,15 @@ struct SettingsView: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .padding(.leading, 2)
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.5)
-                }
+                .agentBarCard(padding: 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -304,31 +369,17 @@ struct SettingsView: View {
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Text(title)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(width: labelWidth, alignment: .leading)
 
-            content()
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .center, spacing: 8) {
+                content()
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func menuBarLabel(_ title: String) -> some View {
-        Text(title)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .frame(height: 26, alignment: .center)
-    }
-
-    private func menuBarControlRow<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            content()
-            Spacer(minLength: 0)
-        }
-        .frame(height: 26, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

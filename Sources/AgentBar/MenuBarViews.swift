@@ -2,8 +2,6 @@ import AgentBarCore
 import AppKit
 import SwiftUI
 
-private let agentBarProgressGreen = Color(nsColor: .systemGreen)
-
 @MainActor
 private final class SettingsWindowManager {
     static let shared = SettingsWindowManager()
@@ -69,6 +67,7 @@ struct MenuBarPanelView: View {
         }
         .frame(width: Self.panelWidth, alignment: .leading)
         .padding(16)
+        .agentBarPanelBackground()
         .onAppear {
             model.popoverOpened()
         }
@@ -92,7 +91,7 @@ struct MenuBarPanelView: View {
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(AgentBarIconButtonStyle())
             .help("Refresh")
             .disabled(model.isRefreshing)
 
@@ -101,7 +100,7 @@ struct MenuBarPanelView: View {
             } label: {
                 Image(systemName: "gearshape")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(AgentBarIconButtonStyle())
             .help("Settings")
         }
     }
@@ -117,7 +116,7 @@ struct MenuBarPanelView: View {
             } label: {
                 Image(systemName: "power")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(AgentBarIconButtonStyle())
             .help("Quit")
         }
     }
@@ -225,7 +224,7 @@ struct CodexQuotaCardView: View {
                         Image(systemName: redactsAccountEmail ? "eye" : "eye.slash")
                             .imageScale(.small)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(AgentBarIconButtonStyle())
                     .help(redactsAccountEmail ? "Show email" : "Hide email")
                 }
                 .font(.caption)
@@ -240,8 +239,7 @@ struct CodexQuotaCardView: View {
             }
 
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard(padding: 12)
     }
 
     @ViewBuilder
@@ -273,8 +271,7 @@ struct CodexQuotaCardView: View {
                 .foregroundStyle(severity == .critical ? Color.red : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard(padding: 12)
     }
 
     private func statusDot(_ severity: CodexQuotaSeverity) -> some View {
@@ -286,11 +283,11 @@ struct CodexQuotaCardView: View {
     private func color(for severity: CodexQuotaSeverity) -> Color {
         switch severity {
         case .ok:
-            return Color(red: 0.00, green: 0.48, blue: 0.18)
+            return AgentBarStyle.green
         case .warning:
-            return Color(nsColor: .systemYellow)
+            return AgentBarStyle.yellow
         case .critical:
-            return Color(nsColor: .systemRed)
+            return AgentBarStyle.red
         }
     }
 
@@ -381,8 +378,7 @@ struct MeterRowView: View {
                     .font(.caption.monospacedDigit().weight(.semibold))
             }
 
-            ProgressView(value: progressValue)
-                .tint(tint)
+            AgentBarProgressBar(value: progressValue, tint: tint)
 
             HStack {
                 Text(resetText)
@@ -408,11 +404,11 @@ struct MeterRowView: View {
         guard let window else { return .secondary }
         switch window.severity {
         case .ok:
-            return agentBarProgressGreen
+            return AgentBarStyle.green
         case .warning:
-            return Color(nsColor: .systemYellow)
+            return AgentBarStyle.yellow
         case .critical:
-            return Color(nsColor: .systemRed)
+            return AgentBarStyle.red
         }
     }
 
@@ -475,8 +471,7 @@ struct UsageTotalTile: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard()
     }
 }
 
@@ -504,8 +499,7 @@ struct TopModelView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard()
     }
 }
 
@@ -568,8 +562,7 @@ struct UsageHeatmapView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard()
     }
 
     private var legend: some View {
@@ -680,14 +673,12 @@ struct SourceBreakdownView: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
-                        ProgressView(value: progress(for: source))
-                            .tint(agentBarProgressGreen)
+                        AgentBarProgressBar(value: progress(for: source), tint: AgentBarStyle.green)
                     }
                 }
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .agentBarCard()
     }
 
     private var maxTokens: Int64 {
