@@ -33,6 +33,7 @@ DerivedData/
 *.log
 .env
 .env.*
+.claude/settings.local.json
 
 # Runtime data
 *.sqlite

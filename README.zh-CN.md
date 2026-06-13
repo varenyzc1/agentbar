@@ -34,12 +34,27 @@ git push origin v0.1.0
 
 ### 通过 Homebrew 安装
 
-发布 Release 后，可以通过 Homebrew tap 分发：
+**方式一 — 直接安装（无需配置 tap）：**
+
+```bash
+brew install --cask "https://raw.githubusercontent.com/varenyzc1/agentbar/main/Casks/agentbar.rb"
+```
+
+**方式二 — 使用 tap（命令更短，自动更新）：**
+
+先创建 tap 仓库：
+
+1. 在 GitHub 上创建一个名为 `homebrew-agentbar` 的仓库（需与 `varenyzc1` 账号一致）。
+2. 创建一个具有 `repo` 权限的 [Personal Access Token](https://github.com/settings/tokens)，然后在 `varenyzc1/agentbar` 仓库的 **Settings > Secrets and variables > Actions** 中添加为 secret，名称为 `TAP_PAT`。
+
+然后安装：
 
 ```bash
 brew tap varenyzc1/agentbar
 brew install --cask agentbar
 ```
+
+完成配置后，每次发布新版本时 CI 会自动更新 cask。
 
 ### 从源码构建
 

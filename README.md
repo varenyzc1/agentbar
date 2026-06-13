@@ -34,12 +34,27 @@ git push origin v0.1.0
 
 ### Install with Homebrew
 
-After releases are published, AgentBar can be distributed through a tap:
+**Option 1 — Install directly (no tap required):**
+
+```bash
+brew install --cask "https://raw.githubusercontent.com/varenyzc1/agentbar/main/Casks/agentbar.rb"
+```
+
+**Option 2 — Use a tap (shorter commands, auto-updates):**
+
+First, create a tap repository:
+
+1. Create a new GitHub repo named `homebrew-agentbar` (under the same `varenyzc1` account).
+2. Create a [Personal Access Token](https://github.com/settings/tokens) with `repo` scope, then add it as a repository secret named `TAP_PAT` in the `varenyzc1/agentbar` repo under **Settings > Secrets and variables > Actions**.
+
+Then install:
 
 ```bash
 brew tap varenyzc1/agentbar
 brew install --cask agentbar
 ```
+
+After this setup, new releases will automatically update the cask via CI.
 
 ### Build from source
 

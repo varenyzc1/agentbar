@@ -7,6 +7,16 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 APP_DIR="$ROOT_DIR/.build/${APP_NAME}.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+VERSION="${AGENTBAR_VERSION:-}"
+
+if [[ -z "$VERSION" ]]; then
+  VERSION="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null || true)"
+  VERSION="${VERSION#v}"
+fi
+
+if [[ -z "$VERSION" ]]; then
+  VERSION="0.1.0"
+fi
 
 cd "$ROOT_DIR"
 swift build -c release --product "$APP_NAME"
@@ -31,7 +41,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
