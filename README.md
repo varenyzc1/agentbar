@@ -23,7 +23,11 @@ AgentBar is a macOS menu bar app for tracking local AI coding assistant usage. I
 1. Open the repository's **Releases** page.
 2. Download `AgentBar-macos.zip` from the latest release.
 3. Unzip it and move `AgentBar.app` to `/Applications`.
-4. Launch the app. If macOS blocks the first run, open **System Settings > Privacy & Security** and allow it.
+4. Launch the app. If macOS shows "AgentBar.app is damaged", run the following command in Terminal to remove the quarantine flag, then open the app again:
+
+```bash
+xattr -cr /Applications/AgentBar.app
+```
 
 This repository includes a GitHub Actions workflow that builds the app and attaches the zip file whenever a version tag is pushed.
 

@@ -23,7 +23,11 @@ AgentBar 是一个 macOS 菜单栏应用，用来查看本地 AI 编程助手的
 1. 打开项目的 **Releases** 页面。
 2. 下载最新版本里的 `AgentBar-macos.zip`。
 3. 解压后把 `AgentBar.app` 移到 `/Applications`。
-4. 启动应用。如果 macOS 首次运行时拦截，请到 **系统设置 > 隐私与安全性** 中允许打开。
+4. 启动应用。如果 macOS 提示"AgentBar.app 已损坏"，在终端运行以下命令移除隔离标记，再重新打开：
+
+```bash
+xattr -cr /Applications/AgentBar.app
+```
 
 仓库里已经包含 GitHub Actions 配置。推送版本 tag 后，会自动构建应用并把 zip 上传到 GitHub Release。
 
