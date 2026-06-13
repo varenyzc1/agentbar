@@ -7,11 +7,12 @@ private final class SettingsWindowManager {
     static let shared = SettingsWindowManager()
     private var window: NSWindow?
 
-    func show(model: AgentBarModel) {
+    @discardableResult
+    func show(model: AgentBarModel) -> NSWindow {
         if let window, window.isVisible {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            return
+            return window
         }
 
         let hostingView = NSHostingView(rootView: SettingsView(model: model))
@@ -26,6 +27,7 @@ private final class SettingsWindowManager {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        return window
     }
 }
 
@@ -48,6 +50,7 @@ struct MenuBarLabelView: View {
 
 struct MenuBarPanelView: View {
     @ObservedObject var model: AgentBarModel
+    @Environment(\.colorScheme) private var colorScheme
 
     private static let panelWidth: CGFloat = 500
 
@@ -80,7 +83,7 @@ struct MenuBarPanelView: View {
                     .font(.headline)
                 Text(model.statusMessage)
                     .font(.caption)
-                    .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.red)
+                    .foregroundStyle(model.errorMessage == nil ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.red)
                     .lineLimit(1)
             }
 
@@ -96,7 +99,11 @@ struct MenuBarPanelView: View {
             .disabled(model.isRefreshing)
 
             Button {
-                SettingsWindowManager.shared.show(model: model)
+                let menuBarWindow = NSApp.keyWindow
+                let settingsWindow = SettingsWindowManager.shared.show(model: model)
+                if menuBarWindow !== settingsWindow {
+                    menuBarWindow?.orderOut(nil)
+                }
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -109,7 +116,7 @@ struct MenuBarPanelView: View {
         HStack {
             Text(lastRefreshText)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
             Spacer()
             Button {
                 NSApplication.shared.terminate(nil)
@@ -133,6 +140,7 @@ struct CodexQuotaCardView: View {
     let state: CodexQuotaCardState
     let quotaItems: [CodexMenuBarQuotaItem]
     let now: Date
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var redactsAccountEmail = false
 
@@ -189,7 +197,7 @@ struct CodexQuotaCardView: View {
                     }
                     Text("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .agentBarSecondaryText()
                 }
 
                 Spacer()
@@ -228,14 +236,14 @@ struct CodexQuotaCardView: View {
                     .help(redactsAccountEmail ? "Show email" : "Hide email")
                 }
                 .font(.caption)
-                .foregroundStyle(isStale ? Color.secondary : Color.primary)
+                .foregroundStyle(isStale ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.primaryText(colorScheme))
             } else if isStale {
                 HStack {
                     Spacer()
                     staleText(isStale: isStale, snapshot: snapshot)
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
             }
 
         }
@@ -246,7 +254,7 @@ struct CodexQuotaCardView: View {
     private func staleText(isStale: Bool, snapshot: CodexQuotaSnapshot) -> some View {
         if isStale {
             Text(AgentBarFormatters.relativeAge(from: now, to: snapshot.fetchedAt))
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
         }
     }
 
@@ -268,7 +276,7 @@ struct CodexQuotaCardView: View {
 
             Text(message)
                 .font(.callout)
-                .foregroundStyle(severity == .critical ? Color.red : Color.secondary)
+                .foregroundStyle(severity == .critical ? AgentBarStyle.red : AgentBarStyle.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .agentBarCard(padding: 12)
@@ -371,7 +379,7 @@ struct MeterRowView: View {
                     .frame(width: 24, alignment: .leading)
                 Text(key.meaning)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
                     .lineLimit(1)
                 Spacer()
                 Text(percentText)
@@ -387,7 +395,7 @@ struct MeterRowView: View {
                     .monospacedDigit()
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .agentBarSecondaryText()
         }
     }
 
@@ -462,13 +470,13 @@ struct UsageTotalTile: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
             Text(AgentBarFormatters.compactTokens(tokens))
                 .font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit()
             Text(AgentBarFormatters.usd(cost))
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .agentBarCard()
@@ -481,11 +489,11 @@ struct TopModelView: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkline")
-                .foregroundStyle(Color(nsColor: .systemGreen))
+                .foregroundStyle(AgentBarStyle.green)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Top Model")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
                 Text(modelUsage?.model ?? "No local usage yet")
                     .font(.callout.weight(.semibold))
                     .lineLimit(1)
@@ -496,7 +504,7 @@ struct TopModelView: View {
                     .font(.callout.monospacedDigit().weight(.semibold))
                 Text(AgentBarFormatters.usd(modelUsage?.costUSD))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
             }
         }
         .agentBarCard()
@@ -516,7 +524,7 @@ struct UsageHeatmapView: View {
             HStack {
                 Text("365 Days")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
                 Spacer()
                 legend
             }
@@ -559,7 +567,7 @@ struct UsageHeatmapView: View {
 
             Text(hoveredDay.map(tooltip(for:)) ?? " ")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
                 .lineLimit(1)
         }
         .agentBarCard()
@@ -576,7 +584,7 @@ struct UsageHeatmapView: View {
             Text("More")
         }
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .agentBarSecondaryText()
     }
 
     private var weeks: [[HeatmapDay?]] {
@@ -655,12 +663,12 @@ struct SourceBreakdownView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sources")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
 
             if sources.isEmpty {
                 Text("No local usage yet")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(sources) { source in
@@ -671,7 +679,7 @@ struct SourceBreakdownView: View {
                             Spacer()
                             Text("\(AgentBarFormatters.compactTokens(source.tokens)) · \(AgentBarFormatters.usd(source.costUSD))")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .agentBarSecondaryText()
                         }
                         AgentBarProgressBar(value: progress(for: source), tint: AgentBarStyle.green)
                     }

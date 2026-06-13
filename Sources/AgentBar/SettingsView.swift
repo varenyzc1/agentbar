@@ -31,7 +31,7 @@ struct SettingsView: View {
                                         .labelsHidden()
 
                                     Text("sec")
-                                        .foregroundStyle(.secondary)
+                                        .agentBarSecondaryText()
                                 }
                             }
 
@@ -55,7 +55,7 @@ struct SettingsView: View {
                                         .textFieldStyle(AgentBarTextFieldStyle())
                                         .frame(width: 98)
                                     Text("tokens")
-                                        .foregroundStyle(.secondary)
+                                        .agentBarSecondaryText()
                                 }
                             }
 
@@ -65,7 +65,7 @@ struct SettingsView: View {
                                         .textFieldStyle(AgentBarTextFieldStyle())
                                         .frame(width: 98)
                                     Text("USD")
-                                        .foregroundStyle(.secondary)
+                                        .agentBarSecondaryText()
                                 }
                             }
                         }
@@ -107,6 +107,15 @@ struct SettingsView: View {
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
                         }
+
+                        settingRow("Database", labelWidth: 58) {
+                            Text(databaseLocationText)
+                                .font(.caption2)
+                                .agentBarSecondaryText()
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
 
@@ -115,7 +124,7 @@ struct SettingsView: View {
                         HStack(spacing: 10) {
                             Text(appVersionText)
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                                .agentBarSecondaryText()
                                 .textSelection(.enabled)
 
                             Spacer(minLength: 0)
@@ -192,6 +201,10 @@ struct SettingsView: View {
 
     private var databaseLocationText: String {
         "~/Library/Application Support/AgentBar/agentbar.db"
+    }
+
+    private var githubRepositoryURL: URL {
+        URL(string: "https://github.com/varenyzc1/agentbar")!
     }
 
     private var appVersionText: String {
@@ -297,7 +310,7 @@ struct SettingsView: View {
                     .fixedSize()
                     .buttonStyle(.plain)
                     Text("Show 5h / 7d")
-                        .foregroundStyle(.secondary)
+                        .agentBarSecondaryText()
                 }
 
                 ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
@@ -326,10 +339,21 @@ struct SettingsView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(databaseLocationText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                Text("By varenyzc")
+                    .font(.caption2.weight(.medium))
+                    .agentBarSecondaryText()
+
+                Button {
+                    NSWorkspace.shared.open(githubRepositoryURL)
+                } label: {
+                    Label("github.com/varenyzc1/agentbar", systemImage: "link")
+                        .font(.caption2.weight(.medium))
+                }
+                .buttonStyle(.plain)
+                .agentBarSecondaryText()
+                .help("Open GitHub repository")
+            }
 
             if let error = model.errorMessage {
                 Text(error)
@@ -339,7 +363,7 @@ struct SettingsView: View {
             } else {
                 Text(model.statusMessage)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .agentBarSecondaryText()
             }
         }
         .padding(.horizontal, 2)
@@ -352,7 +376,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
                 .padding(.leading, 2)
 
             content()
@@ -370,7 +394,7 @@ struct SettingsView: View {
         HStack(alignment: .center, spacing: 10) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .agentBarSecondaryText()
                 .lineLimit(1)
                 .frame(width: labelWidth, alignment: .leading)
 

@@ -1,6 +1,12 @@
-# AgentBar
+<p align="center">
+  <img src="docs/assets/agentbar-icon.png" alt="AgentBar 图标" width="96" height="96">
+</p>
 
-[English](README.md)
+<h1 align="center">AgentBar</h1>
+
+<p align="center">
+  <a href="README.md">English</a>
+</p>
 
 AgentBar 是一个本地优先的 macOS 菜单栏应用，用来查看 AI 编程助手的使用量。它会扫描你 Mac 上的本地使用记录，估算 token 和费用，并把本地使用量与 Codex 配额进度显示在菜单栏里。
 

@@ -47,6 +47,18 @@ enum AgentBarStyle {
             ? Color(red: 0.25, green: 0.27, blue: 0.30)
             : Color(red: 0.86, green: 0.89, blue: 0.91)
     }
+
+    static func primaryText(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.94, green: 0.95, blue: 0.96)
+            : Color(red: 0.04, green: 0.045, blue: 0.05)
+    }
+
+    static func secondaryText(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.66, green: 0.68, blue: 0.70)
+            : Color(red: 0.43, green: 0.44, blue: 0.46)
+    }
 }
 
 struct AgentBarPanelBackground: ViewModifier {
@@ -66,11 +78,11 @@ struct AgentBarCardStyle: ViewModifier {
         content
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .circular)
                     .fill(AgentBarStyle.cardBackground(colorScheme))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .circular)
                     .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
             )
     }
@@ -84,6 +96,33 @@ extension View {
     func agentBarCard(padding: CGFloat = 10) -> some View {
         modifier(AgentBarCardStyle(padding: padding))
     }
+
+    func agentBarPrimaryText() -> some View {
+        modifier(AgentBarTextColorStyle(kind: .primary))
+    }
+
+    func agentBarSecondaryText() -> some View {
+        modifier(AgentBarTextColorStyle(kind: .secondary))
+    }
+}
+
+struct AgentBarTextColorStyle: ViewModifier {
+    enum Kind {
+        case primary
+        case secondary
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+    let kind: Kind
+
+    func body(content: Content) -> some View {
+        switch kind {
+        case .primary:
+            content.foregroundStyle(AgentBarStyle.primaryText(colorScheme))
+        case .secondary:
+            content.foregroundStyle(AgentBarStyle.secondaryText(colorScheme))
+        }
+    }
 }
 
 struct AgentBarIconButtonStyle: ButtonStyle {
@@ -92,17 +131,17 @@ struct AgentBarIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Color.primary)
+            .agentBarPrimaryText()
             .frame(width: 24, height: 24)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .fill(AgentBarStyle.raisedBackground(colorScheme, pressed: configuration.isPressed))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .circular))
     }
 }
 
@@ -112,16 +151,16 @@ struct AgentBarCommandButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.primary)
+            .agentBarPrimaryText()
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(height: 26)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .fill(AgentBarStyle.raisedBackground(colorScheme, pressed: configuration.isPressed))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
             )
     }
@@ -137,11 +176,11 @@ struct AgentBarTextFieldStyle: TextFieldStyle {
             .padding(.horizontal, 7)
             .frame(height: 24)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .fill(AgentBarStyle.fieldBackground(colorScheme))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .circular)
                     .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
             )
     }
@@ -168,12 +207,13 @@ struct AgentBarProgressBar: View {
 }
 
 struct AgentBarCheckbox: View {
+    @Environment(\.colorScheme) private var colorScheme
     let isOn: Bool
 
     var body: some View {
         Image(systemName: isOn ? "checkmark.square.fill" : "square")
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isOn ? AgentBarStyle.green : Color.secondary)
+            .foregroundStyle(isOn ? AgentBarStyle.green : AgentBarStyle.secondaryText(colorScheme))
             .frame(width: 18, height: 18)
             .contentShape(Rectangle())
     }
@@ -215,7 +255,7 @@ struct AgentBarSegmentedPicker<Option: Identifiable & Hashable>: View {
                 } label: {
                     Text(title(option))
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(selection == option ? AgentBarStyle.green : Color.secondary)
+                        .foregroundStyle(selection == option ? AgentBarStyle.green : AgentBarStyle.secondaryText(colorScheme))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .frame(height: 22)
@@ -227,20 +267,20 @@ struct AgentBarSegmentedPicker<Option: Identifiable & Hashable>: View {
         }
         .padding(2)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .circular)
                 .fill(AgentBarStyle.fieldBackground(colorScheme))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .circular)
                 .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 1)
         )
     }
 
     private func segmentBackground(for option: Option) -> some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
+        RoundedRectangle(cornerRadius: 5, style: .circular)
             .fill(selection == option ? AgentBarStyle.selectedBackground(colorScheme) : Color.clear)
             .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: 5, style: .circular)
                     .stroke(selection == option ? AgentBarStyle.green.opacity(0.25) : Color.clear, lineWidth: 0.8)
             )
     }

@@ -7,6 +7,7 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 APP_DIR="$ROOT_DIR/.build/${APP_NAME}.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
 VERSION="${AGENTBAR_VERSION:-}"
 
 if [[ -z "$VERSION" ]]; then
@@ -22,8 +23,9 @@ cd "$ROOT_DIR"
 swift build -c release --product "$APP_NAME"
 
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+cp "$ROOT_DIR/Sources/AgentBar/Resources/AgentBar.icns" "$RESOURCES_DIR/AgentBar.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +42,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>AgentBar</string>
   <key>CFBundleShortVersionString</key>
   <string>$VERSION</string>
   <key>CFBundleVersion</key>

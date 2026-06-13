@@ -20,7 +20,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "AgentBar",
-            dependencies: ["AgentBarCore"]
+            dependencies: ["AgentBarCore"],
+            exclude: ["Resources"]
         ),
         .testTarget(
             name: "AgentBarCoreTests",
