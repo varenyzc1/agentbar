@@ -30,6 +30,7 @@ final class AgentBarModel: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var updateState: AppUpdateState = .idle
     @Published var installMethod: AppInstallMethod = .unknown
+    @Published var codexQuotaRefreshFailure: String?
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
@@ -44,6 +45,7 @@ final class AgentBarModel: ObservableObject {
     private var lastNetworkAttempt: Date?
 
     private let freshQuotaTTL: TimeInterval = 60
+    private let codexQuotaRetryLimit = 3
 
     init(
         settingsStore: AppSettingsStore = AppSettingsStore(),
@@ -99,7 +101,7 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
-    func refresh(force: Bool = false) async {
+    func refresh(force: Bool = false, honorsCodexRefreshInterval: Bool = true) async {
         guard !isRefreshing else { return }
 
         isRefreshing = true
@@ -107,7 +109,11 @@ final class AgentBarModel: ObservableObject {
         errorMessage = nil
         let currentDate = now()
         await refreshLocalUsage(currentDate: currentDate)
-        await refreshCodexQuota(force: force, currentDate: currentDate)
+        await refreshCodexQuota(
+            force: force,
+            currentDate: currentDate,
+            honorsRefreshInterval: honorsCodexRefreshInterval
+        )
         isRefreshing = false
     }
 
@@ -138,9 +144,12 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
-    private func refreshCodexQuota(force: Bool, currentDate: Date) async {
+    private func refreshCodexQuota(force: Bool, currentDate: Date, honorsRefreshInterval: Bool) async {
         let minimumRefreshInterval = TimeInterval(settings.sanitized.codexRefreshIntervalSeconds)
-        if !force, let lastNetworkAttempt, currentDate.timeIntervalSince(lastNetworkAttempt) < minimumRefreshInterval {
+        if honorsRefreshInterval,
+           !force,
+           let lastNetworkAttempt,
+           currentDate.timeIntervalSince(lastNetworkAttempt) < minimumRefreshInterval {
             _ = showCachedSnapshot(now: currentDate, stale: shouldMarkCachedQuotaStale(currentDate))
             return
         }
@@ -163,7 +172,7 @@ final class AgentBarModel: ObservableObject {
         lastNetworkAttempt = currentDate
 
         do {
-            let snapshot = try await client.fetch(credentials: credentials, force: force)
+            let snapshot = try await fetchCodexQuotaWithRetries(credentials: credentials, force: force)
             lastSuccessfulSnapshot = snapshot
             lastRefresh = snapshot.fetchedAt
             try? quotaCacheStore.save(
@@ -174,11 +183,13 @@ final class AgentBarModel: ObservableObject {
                 )
             )
             quotaState = .ready(snapshot.refreshed(now: now()), isStale: false)
+            codexQuotaRefreshFailure = nil
             if statusMessage == "Refreshing" || statusMessage == "Scanning" {
                 statusMessage = "Updated"
             }
         } catch {
             let message = PrivacyScrubber.scrub(error.localizedDescription)
+            codexQuotaRefreshFailure = message
             let hadSnapshot = lastSuccessfulSnapshot != nil
             if !showCachedSnapshot(now: now(), stale: true) {
                 _ = loadCachedCodexQuota(markStale: true)
@@ -186,8 +197,26 @@ final class AgentBarModel: ObservableObject {
             if !isQuotaReady {
                 let displayMessage = hadSnapshot ? "Unable to refresh Codex quota" : message
                 clearQuota(status: displayMessage, state: .error(displayMessage))
+            } else {
+                statusMessage = message
             }
         }
+    }
+
+    private func fetchCodexQuotaWithRetries(credentials: CodexCredentials, force: Bool) async throws -> CodexQuotaSnapshot {
+        var lastError: Error?
+
+        for attempt in 1...codexQuotaRetryLimit {
+            do {
+                return try await client.fetch(credentials: credentials, force: force)
+            } catch {
+                lastError = error
+                guard attempt < codexQuotaRetryLimit else { break }
+            }
+        }
+
+        let message = PrivacyScrubber.scrub(lastError?.localizedDescription ?? "Unable to refresh Codex quota")
+        throw CodexQuotaRefreshError(attempts: codexQuotaRetryLimit, message: message)
     }
 
     func popoverOpened() {
@@ -318,7 +347,7 @@ final class AgentBarModel: ObservableObject {
                 let nanoseconds = UInt64(seconds) * 1_000_000_000
                 try? await Task.sleep(nanoseconds: nanoseconds)
                 guard !Task.isCancelled else { return }
-                await self?.refresh()
+                await self?.refresh(force: false, honorsCodexRefreshInterval: false)
             }
         }
     }
@@ -378,6 +407,7 @@ final class AgentBarModel: ObservableObject {
     }
 
     private func showCachedOrClear(status: String, state: CodexQuotaCardState, currentDate: Date) {
+        codexQuotaRefreshFailure = nil
         if showCachedSnapshot(now: currentDate, stale: true) || loadCachedCodexQuota(markStale: true) {
             statusMessage = "\(status) · showing cached quota"
         } else {
@@ -412,6 +442,9 @@ final class AgentBarModel: ObservableObject {
             } else {
                 lines.append("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
             }
+            if let codexQuotaRefreshFailure {
+                lines.append(codexQuotaRefreshFailure)
+            }
             return lines
         case .unsupportedAPIKey:
             return ["Codex: API key 模式不支持订阅额度查询"]
@@ -443,5 +476,14 @@ final class AgentBarModel: ObservableObject {
             return percent
         }
         return "\(item.key.label) \(percent)"
+    }
+}
+
+private struct CodexQuotaRefreshError: LocalizedError {
+    let attempts: Int
+    let message: String
+
+    var errorDescription: String? {
+        "Codex 额度刷新连续 \(attempts) 次失败: \(message)"
     }
 }

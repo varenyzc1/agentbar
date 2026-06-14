@@ -62,6 +62,7 @@ struct MenuBarPanelView: View {
             CodexQuotaCardView(
                 state: model.quotaState,
                 quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
+                refreshFailureMessage: model.codexQuotaRefreshFailure,
                 now: Date()
             )
             UsageHeatmapView(days: model.usageSummary.heatmapDays)
@@ -139,6 +140,7 @@ struct MenuBarPanelView: View {
 struct CodexQuotaCardView: View {
     let state: CodexQuotaCardState
     let quotaItems: [CodexMenuBarQuotaItem]
+    let refreshFailureMessage: String?
     let now: Date
     @Environment(\.colorScheme) private var colorScheme
 
@@ -195,9 +197,9 @@ struct CodexQuotaCardView: View {
                         Text(snapshot.displayPlan)
                             .font(.headline)
                     }
-                    Text("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                    Text(refreshStatusText(snapshot: snapshot, isStale: isStale))
                         .font(.caption)
-                        .agentBarSecondaryText()
+                        .foregroundStyle(refreshFailureMessage == nil ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.red)
                 }
 
                 Spacer()
@@ -246,6 +248,14 @@ struct CodexQuotaCardView: View {
                 .agentBarSecondaryText()
             }
 
+            if let refreshFailureMessage {
+                Label(refreshFailureMessage, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(AgentBarStyle.red)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         }
         .agentBarCard(padding: 12)
     }
@@ -256,6 +266,17 @@ struct CodexQuotaCardView: View {
             Text(AgentBarFormatters.relativeAge(from: now, to: snapshot.fetchedAt))
                 .agentBarSecondaryText()
         }
+    }
+
+    private func refreshStatusText(snapshot: CodexQuotaSnapshot, isStale: Bool) -> String {
+        let time = snapshot.fetchedAt.formatted(date: .omitted, time: .shortened)
+        if refreshFailureMessage != nil {
+            return "Refresh failed · cached \(time)"
+        }
+        if isStale {
+            return "Cached \(time)"
+        }
+        return "Updated \(time)"
     }
 
     private func statusCard(
