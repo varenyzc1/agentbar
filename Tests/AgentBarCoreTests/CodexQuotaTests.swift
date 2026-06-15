@@ -259,6 +259,7 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.basis), [.used, .used])
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.isEnabled), [true, true])
         XCTAssertEqual(settings.codexMenuBarShowsQuotaLabels, true)
+        XCTAssertEqual(settings.language, .english)
     }
 
     func testSettingsNormalizeMenuBarItemsToSupportedWindows() {

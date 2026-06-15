@@ -185,12 +185,13 @@ final class LocalUsageScannerTests: XCTestCase {
         let settingsURL = home.appendingPathComponent("Application Support/AgentBar/settings.json")
         let store = AppSettingsStore(fileURL: settingsURL)
 
-        try store.save(AppSettings(menuBarMetric: .usedCost, codexRefreshIntervalSeconds: 120))
+        try store.save(AppSettings(menuBarMetric: .usedCost, codexRefreshIntervalSeconds: 120, language: .simplifiedChinese))
         let loaded = store.load()
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: settingsURL.path))
         XCTAssertEqual(loaded.menuBarMetric, .usedCost)
         XCTAssertEqual(loaded.codexRefreshIntervalSeconds, 120)
+        XCTAssertEqual(loaded.language, .simplifiedChinese)
     }
 
     private func temporaryDirectory() -> URL {

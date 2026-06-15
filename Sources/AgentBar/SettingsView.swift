@@ -13,14 +13,14 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                compactSection("Menu Bar") {
+                compactSection(copy.menuBar) {
                     menuBarControls
                 }
 
                 HStack(alignment: .top, spacing: 12) {
-                    compactSection("Refresh") {
+                    compactSection(copy.refresh) {
                         VStack(alignment: .leading, spacing: 9) {
-                            settingRow("Refresh", labelWidth: 58) {
+                            settingRow(copy.refresh, labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $refreshIntervalSeconds)
                                         .textFieldStyle(AgentBarTextFieldStyle())
@@ -30,12 +30,12 @@ struct SettingsView: View {
                                     Stepper("", value: refreshBinding, in: 30...(24 * 60 * 60), step: 30)
                                         .labelsHidden()
 
-                                    Text("sec")
+                                    Text(language == .simplifiedChinese ? "秒" : "sec")
                                         .agentBarSecondaryText()
                                 }
                             }
 
-                            settingRow("Login", labelWidth: 58) {
+                            settingRow(copy.login, labelWidth: 58) {
                                 Button {
                                     launchAtLoginBinding.wrappedValue.toggle()
                                 } label: {
@@ -47,19 +47,19 @@ struct SettingsView: View {
                         }
                     }
 
-                    compactSection("Budgets") {
+                    compactSection(copy.budgets) {
                         VStack(alignment: .leading, spacing: 9) {
-                            settingRow("Tokens", labelWidth: 58) {
+                            settingRow(copy.tokenBudget, labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $monthlyTokenBudget)
                                         .textFieldStyle(AgentBarTextFieldStyle())
                                         .frame(width: 98)
-                                    Text("tokens")
+                                    Text(copy.tokens)
                                         .agentBarSecondaryText()
                                 }
                             }
 
-                            settingRow("Cost", labelWidth: 58) {
+                            settingRow(copy.cost, labelWidth: 58) {
                                 HStack(spacing: 6) {
                                     TextField("", text: $monthlyCostBudget)
                                         .textFieldStyle(AgentBarTextFieldStyle())
@@ -72,13 +72,13 @@ struct SettingsView: View {
                     }
                 }
 
-                compactSection("Maintenance") {
+                compactSection(copy.maintenance) {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 10) {
                             Button {
                                 saveSettingsFromFields()
                             } label: {
-                                Label("Save", systemImage: "square.and.arrow.down")
+                                Label(copy.save, systemImage: "square.and.arrow.down")
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
                             .keyboardShortcut("s", modifiers: [.command])
@@ -86,7 +86,7 @@ struct SettingsView: View {
                             Button {
                                 Task { await model.refresh(force: true) }
                             } label: {
-                                Label("Scan", systemImage: "arrow.clockwise")
+                                Label(copy.scan, systemImage: "arrow.clockwise")
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
                             .disabled(model.isRefreshing)
@@ -96,19 +96,19 @@ struct SettingsView: View {
                             Button {
                                 model.recalculateCosts()
                             } label: {
-                                Label("Recalculate", systemImage: "dollarsign.arrow.circlepath")
+                                Label(copy.recalculate, systemImage: "dollarsign.arrow.circlepath")
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
 
                             Button {
                                 model.resetPricing()
                             } label: {
-                                Label("Reset pricing", systemImage: "arrow.counterclockwise")
+                                Label(copy.resetPricing, systemImage: "arrow.counterclockwise")
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
                         }
 
-                        settingRow("Database", labelWidth: 58) {
+                        settingRow(copy.database, labelWidth: 58) {
                             Text(databaseLocationText)
                                 .font(.caption2)
                                 .agentBarSecondaryText()
@@ -119,7 +119,7 @@ struct SettingsView: View {
                     }
                 }
 
-                compactSection("Updates") {
+                compactSection(copy.updates) {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 10) {
                             Text(appVersionText)
@@ -132,7 +132,7 @@ struct SettingsView: View {
                             Button {
                                 Task { await model.checkForUpdates() }
                             } label: {
-                                Label("Check", systemImage: "arrow.down.circle")
+                                Label(copy.check, systemImage: "arrow.down.circle")
                             }
                             .buttonStyle(AgentBarCommandButtonStyle())
                             .disabled(model.updateState == .checking)
@@ -170,6 +170,14 @@ struct SettingsView: View {
         .onChange(of: monthlyCostBudget) {
             scheduleSettingsAutosave()
         }
+    }
+
+    private var language: AppLanguage {
+        model.settings.language
+    }
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
     }
 
     private var menuBarModeBinding: Binding<CodexMenuBarMode> {
@@ -212,21 +220,7 @@ struct SettingsView: View {
     }
 
     private var updateStatusText: String {
-        switch model.updateState {
-        case .idle:
-            return "\(model.installMethod.displayText) Check GitHub Releases for a newer version."
-        case .checking:
-            return "Checking for updates..."
-        case let .upToDate(version):
-            return "You are up to date on \(version). \(model.installMethod.displayText)"
-        case let .available(version, _):
-            if model.installMethod == .homebrew {
-                return "AgentBar \(version) is available. Update with Homebrew."
-            }
-            return "AgentBar \(version) is available. Open the release page to install it."
-        case let .failed(message):
-            return message
-        }
+        copy.updateStatus(model.updateState, installMethod: model.installMethod)
     }
 
     private var updateStatusColor: Color {
@@ -247,14 +241,14 @@ struct SettingsView: View {
                 Button {
                     model.updateWithHomebrew()
                 } label: {
-                    Label("Update", systemImage: "arrow.triangle.2.circlepath")
+                    Label(copy.update, systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(AgentBarCommandButtonStyle())
             } else {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
-                    Label("Open", systemImage: "arrow.up.forward.app")
+                    Label(copy.open, systemImage: "arrow.up.forward.app")
                 }
                 .buttonStyle(AgentBarCommandButtonStyle())
             }
@@ -280,28 +274,28 @@ struct SettingsView: View {
 
     private var menuBarControls: some View {
         VStack(alignment: .leading, spacing: 9) {
-            settingRow("Display", labelWidth: 82) {
+            settingRow(copy.display, labelWidth: 82) {
                 AgentBarSegmentedPicker(
                     options: CodexMenuBarMode.allCases,
                     selection: menuBarModeBinding,
-                    title: \.title
+                    title: copy.menuModeTitle
                 )
                 .frame(width: 260, alignment: .leading)
             }
 
             if model.settings.codexMenuBarMode == .iconOnly {
-                settingRow("Metric", labelWidth: 82) {
+                settingRow(copy.metric, labelWidth: 82) {
                     AgentBarSegmentedPicker(
                         options: MenuBarMetric.allCases,
                         selection: menuBarMetricBinding,
-                        title: \.title
+                        title: copy.metricTitle
                     )
                     .frame(width: 260, alignment: .leading)
                 }
             }
 
             if model.settings.codexMenuBarMode == .plan {
-                settingRow("Labels", labelWidth: 82) {
+                settingRow(copy.labels, labelWidth: 82) {
                     Button {
                         showQuotaLabelsBinding.wrappedValue.toggle()
                     } label: {
@@ -309,12 +303,12 @@ struct SettingsView: View {
                     }
                     .fixedSize()
                     .buttonStyle(.plain)
-                    Text("Show 5h / 7d")
+                    Text(language == .simplifiedChinese ? "显示 5h / 7d" : "Show 5h / 7d")
                         .agentBarSecondaryText()
                 }
 
                 ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
-                    settingRow("\(key.label) quota", labelWidth: 82) {
+                    settingRow(copy.quotaLabel(key), labelWidth: 82) {
                         Button {
                             enabledBinding(for: key).wrappedValue.toggle()
                         } label: {
@@ -326,11 +320,20 @@ struct SettingsView: View {
                         AgentBarSegmentedPicker(
                             options: CodexQuotaPercentBasis.allCases,
                             selection: basisBinding(for: key),
-                            title: \.title
+                            title: copy.quotaBasisTitle
                         )
                         .frame(width: 154, alignment: .leading)
                         .disabled(!quotaItem(for: key).isEnabled)
                     }
+                }
+
+                settingRow(copy.languageLabel, labelWidth: 82) {
+                    AgentBarSegmentedPicker(
+                        options: AppLanguage.allCases,
+                        selection: languageBinding,
+                        title: copy.languageTitle
+                    )
+                    .frame(width: 154, alignment: .leading)
                 }
             }
         }
@@ -340,7 +343,7 @@ struct SettingsView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("By varenyzc")
+                Text(copy.byline)
                     .font(.caption2.weight(.medium))
                     .agentBarSecondaryText()
 
@@ -352,7 +355,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .agentBarSecondaryText()
-                .help("Open GitHub repository")
+                .help(copy.openGitHubRepository)
             }
 
             if let error = model.errorMessage {
@@ -361,7 +364,7 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
                     .lineLimit(2)
             } else {
-                Text(model.statusMessage)
+                Text(copy.statusMessage(model.statusMessage))
                     .font(.caption2)
                     .agentBarSecondaryText()
             }
@@ -485,5 +488,15 @@ struct SettingsView: View {
         update(&items[index])
         model.settings.codexMenuBarQuotaItems = items
         model.persistSettings()
+    }
+
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { model.settings.language },
+            set: { language in
+                model.settings.language = language
+                model.persistSettings()
+            }
+        )
     }
 }

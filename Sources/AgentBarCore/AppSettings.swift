@@ -54,6 +54,22 @@ public enum CodexQuotaPercentBasis: String, Codable, CaseIterable, Identifiable,
     }
 }
 
+public enum AppLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
+    case english = "en"
+    case simplifiedChinese = "zh-Hans"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .english:
+            return "English"
+        case .simplifiedChinese:
+            return "中文"
+        }
+    }
+}
+
 public struct CodexMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable {
     public var id: CodexQuotaKey { key }
 
@@ -107,6 +123,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var estimatedInputCostPerMillion: Double
     public var estimatedOutputCostPerMillion: Double
     public var launchAtLogin: Bool
+    public var language: AppLanguage
 
     public init(
         menuBarMetric: MenuBarMetric = .usedTokens,
@@ -124,7 +141,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         userIDs: [String] = [],
         estimatedInputCostPerMillion: Double = 0,
         estimatedOutputCostPerMillion: Double = 0,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        language: AppLanguage = .english
     ) {
         self.menuBarMetric = menuBarMetric
         self.codexMenuBarMode = codexMenuBarMode
@@ -142,6 +160,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.estimatedInputCostPerMillion = estimatedInputCostPerMillion
         self.estimatedOutputCostPerMillion = estimatedOutputCostPerMillion
         self.launchAtLogin = launchAtLogin
+        self.language = language
     }
 
     public var timeZone: TimeZone {
@@ -185,6 +204,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case estimatedInputCostPerMillion
         case estimatedOutputCostPerMillion
         case launchAtLogin
+        case language
     }
 
     public init(from decoder: Decoder) throws {
@@ -205,7 +225,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
             userIDs: try container.decodeIfPresent([String].self, forKey: .userIDs) ?? [],
             estimatedInputCostPerMillion: try container.decodeIfPresent(Double.self, forKey: .estimatedInputCostPerMillion) ?? 0,
             estimatedOutputCostPerMillion: try container.decodeIfPresent(Double.self, forKey: .estimatedOutputCostPerMillion) ?? 0,
-            launchAtLogin: try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+            launchAtLogin: try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false,
+            language: try container.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .english
         )
     }
 }

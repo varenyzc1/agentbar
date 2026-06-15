@@ -10,17 +10,19 @@ private final class SettingsWindowManager {
     @discardableResult
     func show(model: AgentBarModel) -> NSWindow {
         if let window, window.isVisible {
+            window.title = AgentBarCopy(language: model.settings.language).settingsWindowTitle
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return window
         }
 
+        let copy = AgentBarCopy(language: model.settings.language)
         let hostingView = NSHostingView(rootView: SettingsView(model: model))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
                               styleMask: [.titled, .closable],
                               backing: .buffered,
                               defer: false)
-        window.title = "AgentBar Settings"
+        window.title = copy.settingsWindowTitle
         window.contentView = hostingView
         window.center()
         window.isReleasedWhenClosed = false
@@ -53,20 +55,24 @@ struct MenuBarPanelView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private static let panelWidth: CGFloat = 500
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: model.settings.language)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            UsageTotalsView(summary: model.usageSummary)
-            TopModelView(modelUsage: model.usageSummary.topModel7Days)
+            UsageTotalsView(summary: model.usageSummary, language: model.settings.language)
+            TopModelView(modelUsage: model.usageSummary.topModel7Days, language: model.settings.language)
             CodexQuotaCardView(
                 state: model.quotaState,
                 quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
                 refreshFailureMessage: model.codexQuotaRefreshFailure,
-                now: Date()
+                now: Date(),
+                language: model.settings.language
             )
-            UsageHeatmapView(days: model.usageSummary.heatmapDays)
-            SourceBreakdownView(sources: model.usageSummary.sourceBreakdown7Days)
+            UsageHeatmapView(days: model.usageSummary.heatmapDays, language: model.settings.language)
+            SourceBreakdownView(sources: model.usageSummary.sourceBreakdown7Days, language: model.settings.language)
             footer
         }
         .frame(width: Self.panelWidth, alignment: .leading)
@@ -82,7 +88,7 @@ struct MenuBarPanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("AgentBar")
                     .font(.headline)
-                Text(model.statusMessage)
+                Text(copy.statusMessage(model.statusMessage))
                     .font(.caption)
                     .foregroundStyle(model.errorMessage == nil ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.red)
                     .lineLimit(1)
@@ -96,7 +102,7 @@ struct MenuBarPanelView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(AgentBarIconButtonStyle())
-            .help("Refresh")
+            .help(copy.refresh)
             .disabled(model.isRefreshing)
 
             Button {
@@ -109,7 +115,7 @@ struct MenuBarPanelView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(AgentBarIconButtonStyle())
-            .help("Settings")
+            .help(copy.settings)
         }
     }
 
@@ -125,15 +131,15 @@ struct MenuBarPanelView: View {
                 Image(systemName: "power")
             }
             .buttonStyle(AgentBarIconButtonStyle())
-            .help("Quit")
+            .help(copy.quit)
         }
     }
 
     private var lastRefreshText: String {
         guard let lastRefresh = model.lastRefresh else {
-            return "Not refreshed"
+            return copy.notRefreshed
         }
-        return "Updated \(lastRefresh.formatted(date: .omitted, time: .shortened))"
+        return copy.updated(at: lastRefresh)
     }
 }
 
@@ -142,16 +148,20 @@ struct CodexQuotaCardView: View {
     let quotaItems: [CodexMenuBarQuotaItem]
     let refreshFailureMessage: String?
     let now: Date
+    let language: AppLanguage
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var redactsAccountEmail = false
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         switch state {
         case .loading:
             statusCard(
                 title: "Codex",
-                message: "Refreshing quota",
+                message: copy.refreshingQuota,
                 severity: .ok,
                 systemImage: "arrow.triangle.2.circlepath"
             )
@@ -160,21 +170,21 @@ struct CodexQuotaCardView: View {
         case .unsupportedAPIKey:
             statusCard(
                 title: "Codex",
-                message: "API 模式不支持订阅额度,请用 ChatGPT 订阅登录",
+                message: copy.unsupportedAPIKey,
                 severity: .ok,
                 systemImage: "key.slash"
             )
         case .notConfigured:
             statusCard(
                 title: "Codex",
-                message: "Codex 未配置\ncodex login",
+                message: copy.codexNotConfigured,
                 severity: .ok,
                 systemImage: "terminal"
             )
         case .notLoggedIn:
             statusCard(
                 title: "Codex",
-                message: "未登录,运行 codex login",
+                message: copy.codexNotLoggedIn,
                 severity: .ok,
                 systemImage: "person.crop.circle.badge.exclamationmark"
             )
@@ -216,7 +226,8 @@ struct CodexQuotaCardView: View {
                         window: snapshot.window(for: key),
                         key: key,
                         basis: quotaItem(for: key).basis,
-                        now: now
+                        now: now,
+                        language: language
                     )
                 }
             }
@@ -235,7 +246,7 @@ struct CodexQuotaCardView: View {
                             .imageScale(.small)
                     }
                     .buttonStyle(AgentBarIconButtonStyle())
-                    .help(redactsAccountEmail ? "Show email" : "Hide email")
+                    .help(redactsAccountEmail ? copy.showEmail : copy.hideEmail)
                 }
                 .font(.caption)
                 .foregroundStyle(isStale ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.primaryText(colorScheme))
@@ -269,14 +280,7 @@ struct CodexQuotaCardView: View {
     }
 
     private func refreshStatusText(snapshot: CodexQuotaSnapshot, isStale: Bool) -> String {
-        let time = snapshot.fetchedAt.formatted(date: .omitted, time: .shortened)
-        if refreshFailureMessage != nil {
-            return "Refresh failed · cached \(time)"
-        }
-        if isStale {
-            return "Cached \(time)"
-        }
-        return "Updated \(time)"
+        copy.refreshStatus(snapshot: snapshot, isStale: isStale, failed: refreshFailureMessage != nil)
     }
 
     private func statusCard(
@@ -391,6 +395,11 @@ struct MeterRowView: View {
     let key: CodexQuotaKey
     let basis: CodexQuotaPercentBasis
     let now: Date
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -398,7 +407,7 @@ struct MeterRowView: View {
                 Text(key.label)
                     .font(.caption.weight(.semibold))
                     .frame(width: 24, alignment: .leading)
-                Text(key.meaning)
+                Text(copy.quotaMeaning(key))
                     .font(.caption)
                     .agentBarSecondaryText()
                     .lineLimit(1)
@@ -442,9 +451,9 @@ struct MeterRowView: View {
     }
 
     private var resetText: String {
-        guard let window else { return "unavailable" }
+        guard let window else { return copy.unavailable }
         if window.stale {
-            return "stale"
+            return copy.stale
         }
         return AgentBarFormatters.relativeReset(from: now, to: window.resetsAt)
     }
@@ -460,21 +469,26 @@ struct MeterRowView: View {
 
 struct UsageTotalsView: View {
     let summary: UsageSummary
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             UsageTotalTile(
-                title: "Today",
+                title: copy.today,
                 tokens: summary.today.totalTokens,
                 cost: summary.today.costUSD
             )
             UsageTotalTile(
-                title: "7D",
+                title: copy.sevenDaysShort,
                 tokens: summary.sevenDayTokens,
                 cost: summary.sevenDayCostUSD
             )
             UsageTotalTile(
-                title: "All",
+                title: copy.all,
                 tokens: summary.allTimeTokens,
                 cost: summary.allTimeCostUSD
             )
@@ -506,16 +520,21 @@ struct UsageTotalTile: View {
 
 struct TopModelView: View {
     let modelUsage: ModelUsage?
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkline")
                 .foregroundStyle(AgentBarStyle.green)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Top Model")
+                Text(copy.topModel)
                     .font(.caption.weight(.semibold))
                     .agentBarSecondaryText()
-                Text(modelUsage?.model ?? "No local usage yet")
+                Text(modelUsage?.model ?? copy.noLocalUsageYet)
                     .font(.callout.weight(.semibold))
                     .lineLimit(1)
             }
@@ -534,16 +553,20 @@ struct TopModelView: View {
 
 struct UsageHeatmapView: View {
     let days: [HeatmapDay]
+    let language: AppLanguage
     @Environment(\.colorScheme) private var colorScheme
     @State private var hoveredDay: HeatmapDay?
 
     private let cellSize: CGFloat = 10
     private let cellSpacing: CGFloat = 1
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("365 Days")
+                Text(copy.days365)
                     .font(.caption.weight(.semibold))
                     .agentBarSecondaryText()
                 Spacer()
@@ -596,13 +619,13 @@ struct UsageHeatmapView: View {
 
     private var legend: some View {
         HStack(spacing: 4) {
-            Text("Less")
+            Text(copy.less)
             ForEach(0..<5, id: \.self) { level in
                 RoundedRectangle(cornerRadius: 2)
                     .fill(color(for: level))
                     .frame(width: 10, height: 10)
             }
-            Text("More")
+            Text(copy.more)
         }
         .font(.caption2)
         .agentBarSecondaryText()
@@ -643,9 +666,12 @@ struct UsageHeatmapView: View {
     }
 
     private func tooltip(for day: HeatmapDay) -> String {
-        let base = "\(day.day) · \(AgentBarFormatters.compactTokens(day.tokens)) tokens · \(AgentBarFormatters.usd(day.costUSD))"
-        guard let model = displayModel(day.topModel) else { return base }
-        return "\(base) · \(model)"
+        copy.tooltipTokens(
+            day: day.day,
+            tokens: day.tokens,
+            cost: day.costUSD,
+            model: displayModel(day.topModel)
+        )
     }
 
     private func color(for level: Int) -> Color {
@@ -679,15 +705,20 @@ struct UsageHeatmapView: View {
 
 struct SourceBreakdownView: View {
     let sources: [SourceUsage]
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Sources")
+            Text(copy.sources)
                 .font(.caption.weight(.semibold))
                 .agentBarSecondaryText()
 
             if sources.isEmpty {
-                Text("No local usage yet")
+                Text(copy.noLocalUsageYet)
                     .font(.callout)
                     .agentBarSecondaryText()
                     .frame(maxWidth: .infinity, alignment: .leading)

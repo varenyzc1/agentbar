@@ -328,12 +328,13 @@ final class AgentBarModel: ObservableObject {
 
     var menuBarTooltip: String {
         let currentDate = now()
-        let todayModel = usageSummary.todayTopModel?.model ?? "no model"
+        let copy = AgentBarCopy(language: settings.language)
+        let todayModel = usageSummary.todayTopModel?.model ?? copy.noModel
         var lines = codexTooltipLines(now: currentDate)
         lines.append(contentsOf: [
-            "Today    \(AgentBarFormatters.compactTokens(usageSummary.today.totalTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.today.costUSD)) · \(todayModel)",
-            "Week     \(AgentBarFormatters.compactTokens(usageSummary.sevenDayTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.sevenDayCostUSD))",
-            "All time \(AgentBarFormatters.compactTokens(usageSummary.allTimeTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.allTimeCostUSD))"
+            "\(copy.today)    \(AgentBarFormatters.compactTokens(usageSummary.today.totalTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.today.costUSD)) · \(todayModel)",
+            "\(copy.sevenDaysShort)     \(AgentBarFormatters.compactTokens(usageSummary.sevenDayTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.sevenDayCostUSD))",
+            "\(copy.all)      \(AgentBarFormatters.compactTokens(usageSummary.allTimeTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.allTimeCostUSD))"
         ])
         return lines.joined(separator: "\n")
     }
@@ -365,7 +366,7 @@ final class AgentBarModel: ObservableObject {
             return limitedTitle(AgentBarFormatters.usd(usageSummary.today.costUSD))
         case .remainingPercent:
             guard let remainingPercent = usageSummary.quota.preferredRemainingPercent else {
-                return "No budget"
+                return AgentBarCopy(language: settings.language).noBudget
             }
             return limitedTitle(AgentBarFormatters.percent(remainingPercent))
         }
@@ -425,6 +426,7 @@ final class AgentBarModel: ObservableObject {
     }
 
     private func codexTooltipLines(now currentDate: Date) -> [String] {
+        let copy = AgentBarCopy(language: settings.language)
         switch quotaState {
         case let .ready(snapshot, isStale):
             var lines = [snapshot.displayPlan]
@@ -432,30 +434,31 @@ final class AgentBarModel: ObservableObject {
                 if let window = snapshot.window(for: key) {
                     let used = AgentBarFormatters.percent(window.usedPercent)
                     let reset = AgentBarFormatters.relativeReset(from: currentDate, to: window.resetsAt)
-                    lines.append("\(key.label):  \(used) used · \(reset)")
+                    lines.append("\(key.label):  \(used) \(copy.used) · \(reset)")
                 } else {
-                    lines.append("\(key.label):  -- used · unavailable")
+                    lines.append("\(key.label):  -- \(copy.used) · \(copy.unavailable)")
                 }
             }
             if isStale {
-                lines.append("Stale · fetched \(AgentBarFormatters.relativeAge(from: currentDate, to: snapshot.fetchedAt))")
+                let age = AgentBarFormatters.relativeAge(from: currentDate, to: snapshot.fetchedAt)
+                lines.append(settings.language == .simplifiedChinese ? "已过期 · 获取于 \(age)" : "Stale · fetched \(age)")
             } else {
-                lines.append("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                lines.append(copy.updated(at: snapshot.fetchedAt))
             }
             if let codexQuotaRefreshFailure {
                 lines.append(codexQuotaRefreshFailure)
             }
             return lines
         case .unsupportedAPIKey:
-            return ["Codex: API key 模式不支持订阅额度查询"]
+            return ["Codex: \(copy.unsupportedAPIKey)"]
         case .notConfigured:
-            return ["Codex: 未配置"]
+            return ["Codex: \(settings.language == .simplifiedChinese ? "未配置" : "Not configured")"]
         case .notLoggedIn:
-            return ["Codex: 未登录,运行 codex login"]
+            return ["Codex: \(settings.language == .simplifiedChinese ? "未登录，请运行 codex login" : "Not signed in. Run codex login")"]
         case let .error(message):
             return ["Codex: \(message)"]
         case .loading:
-            return ["Codex: Refreshing quota"]
+            return ["Codex: \(copy.refreshingQuota)"]
         }
     }
 
