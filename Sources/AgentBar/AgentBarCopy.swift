@@ -47,6 +47,7 @@ struct AgentBarCopy {
     var more: String { text("More", "多") }
     var sources: String { text("Sources", "来源") }
     var byline: String { text("By varenyzc", "作者 varenyzc") }
+    var contributorByline: String { text("By ZengWenJian123", "协作 ZengWenJian123") }
     var openGitHubRepository: String { text("Open GitHub repository", "打开 GitHub 仓库") }
     var invalidSettings: String { text("Invalid settings", "设置无效") }
     var noBudget: String { text("No budget", "未设置预算") }

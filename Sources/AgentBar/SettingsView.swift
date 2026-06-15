@@ -215,6 +215,10 @@ struct SettingsView: View {
         URL(string: "https://github.com/varenyzc1/agentbar")!
     }
 
+    private var contributorGitHubURL: URL {
+        URL(string: "https://github.com/ZengWenJian123")!
+    }
+
     private var appVersionText: String {
         AppVersion.current.displayText
     }
@@ -351,6 +355,22 @@ struct SettingsView: View {
                     NSWorkspace.shared.open(githubRepositoryURL)
                 } label: {
                     Label("github.com/varenyzc1/agentbar", systemImage: "link")
+                        .font(.caption2.weight(.medium))
+                }
+                .buttonStyle(.plain)
+                .agentBarSecondaryText()
+                .help(copy.openGitHubRepository)
+            }
+
+            HStack(spacing: 8) {
+                Text(copy.contributorByline)
+                    .font(.caption2.weight(.medium))
+                    .agentBarSecondaryText()
+
+                Button {
+                    NSWorkspace.shared.open(contributorGitHubURL)
+                } label: {
+                    Label("github.com/ZengWenJian123", systemImage: "link")
                         .font(.caption2.weight(.medium))
                 }
                 .buttonStyle(.plain)
