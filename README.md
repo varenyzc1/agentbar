@@ -177,21 +177,26 @@ Releases are built by GitHub Actions when a `v*` tag is pushed. CI runs tests, b
 
 ### Publishing a New Release
 
-1. Make sure all changes are committed and pushed.
+Releases are automatic after app or package changes are merged to `main`.
 
-2. Run tests:
+1. Before merging, run tests:
 
    ```bash
    swift test
    ```
 
-3. Create and push a version tag:
+2. Merge the pull request to `main`.
 
-   ```bash
-   ./release.sh 0.2.0
-   ```
+   The `Auto Release` workflow checks whether the merge changed `Sources/` or `Package.swift`. If so, it creates the next `vX.Y.Z` tag and starts the release workflow. Version bumps are inferred from commit messages since the latest release tag:
 
-   This creates a `v0.2.0` tag and pushes it to GitHub. CI automatically:
+   - `BREAKING CHANGE:` or a `!` marker, such as `feat!:`, bumps the major version.
+   - `feat:` bumps the minor version.
+   - Everything else bumps the patch version.
+
+   Add `[skip release]` or `[no release]` to the merge commit message to skip automatic release creation.
+
+3. CI automatically:
+
    - Runs the test suite
    - Builds the `.app` bundle
    - Packages `AgentBar-macos.zip` and `AgentBar-macos.dmg`
@@ -199,6 +204,14 @@ Releases are built by GitHub Actions when a `v*` tag is pushed. CI runs tests, b
    - Updates the Homebrew cask (if `TAP_PAT` secret is configured)
 
 4. Monitor the build at **Actions** on the GitHub repository page. Once complete, the release with downloadable assets appears at **Releases**.
+
+To publish manually, create and push a version tag:
+
+```bash
+./release.sh 0.2.0
+```
+
+This creates a `v0.2.0` tag and pushes it to GitHub, which starts the same release workflow.
 
 ## Contributing
 

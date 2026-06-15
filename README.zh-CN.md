@@ -149,7 +149,7 @@ swift test
 
 ## 发布流程
 
-推送 `v*` tag 后，GitHub Actions 会构建 release。CI 会运行测试、构建 app bundle、上传 `AgentBar-macos.zip` 和 `AgentBar-macos.dmg` 到 GitHub Releases，并在配置 `TAP_PAT` 后更新 Homebrew cask。
+影响 app 或 package 的改动合并到 `main` 后会自动发布。`Auto Release` workflow 会创建下一个 `vX.Y.Z` tag，并启动 release workflow。CI 会运行测试、构建 app bundle、上传 `AgentBar-macos.zip` 和 `AgentBar-macos.dmg` 到 GitHub Releases，并在配置 `TAP_PAT` 后更新 Homebrew cask。
 
 ### 日常开发
 
@@ -177,21 +177,24 @@ swift test
 
 ### 发布新版本
 
-1. 确保所有改动已提交并推送到远程。
-
-2. 运行测试：
+1. 合并前运行测试：
 
    ```bash
    swift test
    ```
 
-3. 创建并推送版本 tag：
+2. 将 pull request 合并到 `main`。
 
-   ```bash
-   ./release.sh 0.2.0
-   ```
+   `Auto Release` workflow 会先检查这次合并是否改动了 `Sources/` 或 `Package.swift`。若有相关改动，它会根据最近一个 release tag 之后的提交信息推断版本升级方式：
 
-   这会创建 `v0.2.0` tag 并推送到 GitHub。CI 自动完成：
+   - `BREAKING CHANGE:` 或 `feat!:` 这类 `!` 标记会升级 major 版本。
+   - `feat:` 会升级 minor 版本。
+   - 其他提交默认升级 patch 版本。
+
+   如果要跳过自动发布，在 merge commit 信息里加入 `[skip release]` 或 `[no release]`。
+
+3. CI 自动完成：
+
    - 运行测试
    - 构建 `.app` bundle
    - 打包 `AgentBar-macos.zip` 和 `AgentBar-macos.dmg`
@@ -199,6 +202,14 @@ swift test
    - 更新 Homebrew cask（需配置 `TAP_PAT` secret）
 
 4. 在 GitHub 仓库页面的 **Actions** 查看构建进度。构建完成后，**Releases** 页面会出现可下载的 dmg 和 zip 文件。
+
+如需手动发布，可以创建并推送版本 tag：
+
+```bash
+./release.sh 0.2.0
+```
+
+这会创建 `v0.2.0` tag 并推送到 GitHub，然后启动同一个 release workflow。
 
 ## 参与贡献
 
