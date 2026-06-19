@@ -41,9 +41,12 @@ final class AgentBarModel: ObservableObject {
     private let scanner: UsageScanner?
 
     private var refreshLoop: Task<Void, Never>?
+    private var startupLocalUsageScanTask: Task<Void, Never>?
+    private var isScanningLocalUsage = false
     private var lastSuccessfulSnapshot: CodexQuotaSnapshot?
     private var lastNetworkAttempt: Date?
 
+    private let startupLocalUsageScanDelay: UInt64 = 1_500_000_000
     private let freshQuotaTTL: TimeInterval = 60
     private let codexQuotaRetryLimit = 3
 
@@ -78,12 +81,14 @@ final class AgentBarModel: ObservableObject {
 
         loadCachedCodexQuota()
         scheduleRefresh()
+        scheduleStartupLocalUsageScan()
         Task { await refreshInstallMethod() }
-        Task { await refresh(force: false) }
+        Task { await refresh(force: false, scansLocalUsage: false) }
     }
 
     deinit {
         refreshLoop?.cancel()
+        startupLocalUsageScanTask?.cancel()
     }
 
     func persistSettings() {
@@ -102,13 +107,27 @@ final class AgentBarModel: ObservableObject {
     }
 
     func refresh(force: Bool = false, honorsCodexRefreshInterval: Bool = true) async {
+        await refresh(
+            force: force,
+            honorsCodexRefreshInterval: honorsCodexRefreshInterval,
+            scansLocalUsage: true
+        )
+    }
+
+    private func refresh(
+        force: Bool,
+        honorsCodexRefreshInterval: Bool = true,
+        scansLocalUsage: Bool
+    ) async {
         guard !isRefreshing else { return }
 
         isRefreshing = true
         statusMessage = force ? "Scanning" : "Refreshing"
         errorMessage = nil
         let currentDate = now()
-        await refreshLocalUsage(currentDate: currentDate)
+        if scansLocalUsage {
+            await refreshLocalUsage(currentDate: currentDate)
+        }
         await refreshCodexQuota(
             force: force,
             currentDate: currentDate,
@@ -118,11 +137,15 @@ final class AgentBarModel: ObservableObject {
     }
 
     private func refreshLocalUsage(currentDate: Date) async {
+        guard !isScanningLocalUsage else { return }
         guard let database, let scanner else {
             errorMessage = "Unable to open local database"
             statusMessage = "Database error"
             return
         }
+
+        isScanningLocalUsage = true
+        defer { isScanningLocalUsage = false }
 
         let settings = self.settings
 
@@ -141,6 +164,22 @@ final class AgentBarModel: ObservableObject {
         } catch {
             errorMessage = PrivacyScrubber.scrub(error.localizedDescription)
             statusMessage = "Scan failed"
+        }
+    }
+
+    private func refreshLocalUsageAfterStartup() async {
+        let ownsRefreshIndicator = !isRefreshing
+        if ownsRefreshIndicator {
+            isRefreshing = true
+        }
+        if statusMessage == "Ready" || statusMessage == "Refreshing" {
+            statusMessage = "Scanning"
+        }
+
+        await refreshLocalUsage(currentDate: now())
+
+        if ownsRefreshIndicator {
+            isRefreshing = false
         }
     }
 
@@ -353,6 +392,16 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
+    private func scheduleStartupLocalUsageScan() {
+        startupLocalUsageScanTask?.cancel()
+        let delay = startupLocalUsageScanDelay
+        startupLocalUsageScanTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            await self?.refreshLocalUsageAfterStartup()
+        }
+    }
+
     private func limitedTitle(_ value: String) -> String {
         guard value.count > 32 else { return value }
         return String(value.prefix(32)) + "..."
@@ -433,7 +482,7 @@ final class AgentBarModel: ObservableObject {
             for key in CodexMenuBarQuotaItem.supportedKeys {
                 if let window = snapshot.window(for: key) {
                     let used = AgentBarFormatters.percent(window.usedPercent)
-                    let reset = AgentBarFormatters.relativeReset(from: currentDate, to: window.resetsAt)
+                    let reset = AgentBarFormatters.relativeReset(from: currentDate, to: window.resetsAt, language: settings.language)
                     lines.append("\(key.label):  \(used) \(copy.used) · \(reset)")
                 } else {
                     lines.append("\(key.label):  -- \(copy.used) · \(copy.unavailable)")

@@ -468,7 +468,7 @@ struct MeterRowView: View {
         if window.stale {
             return copy.stale
         }
-        return AgentBarFormatters.relativeReset(from: now, to: window.resetsAt)
+        return AgentBarFormatters.relativeReset(from: now, to: window.resetsAt, language: language)
     }
 
     private var resetTimeText: String {

@@ -39,19 +39,30 @@ public enum AgentBarFormatters {
         return String(format: "%.0f%%", value)
     }
 
-    public static func relativeReset(from now: Date, to date: Date) -> String {
+    public static func relativeReset(from now: Date, to date: Date, language: AppLanguage = .english) -> String {
         let seconds = Int(date.timeIntervalSince(now).rounded())
-        guard seconds > 0 else { return "reset now" }
+        guard seconds > 0 else {
+            return language == .simplifiedChinese ? "现在重置" : "reset now"
+        }
 
         let days = seconds / 86_400
         let hours = (seconds % 86_400) / 3_600
         let minutes = (seconds % 3_600) / 60
 
         if days > 0 {
+            if language == .simplifiedChinese {
+                return hours > 0 ? "\(days)天 \(hours)小时后重置" : "\(days)天后重置"
+            }
             return hours > 0 ? "resets in \(days)d \(hours)h" : "resets in \(days)d"
         }
         if hours > 0 {
+            if language == .simplifiedChinese {
+                return minutes > 0 ? "\(hours)小时 \(minutes)分钟后重置" : "\(hours)小时后重置"
+            }
             return minutes > 0 ? "resets in \(hours)h \(minutes)m" : "resets in \(hours)h"
+        }
+        if language == .simplifiedChinese {
+            return "\(max(1, minutes))分钟后重置"
         }
         return "resets in \(max(1, minutes))m"
     }
