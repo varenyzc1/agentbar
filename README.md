@@ -72,15 +72,17 @@ open .build/AgentBar.app
 - Menu bar display modes for quota, alerts, or local usage.
 - Codex quota indicators for 5-hour and 7-day rolling windows.
 - Local usage summaries for today, 7 days, and all time.
+- Subtle sparkline backgrounds on summary cards to show usage trends over time.
 - Source breakdowns for tools such as Codex and Claude Code.
-- 365-day activity heatmap.
+- 365-day activity heatmap with a GitHub-style staggered opening animation.
+- English and Simplified Chinese interface switching from Settings.
 - Pricing-based cost estimates and budget settings.
 - Manual scan, cost recalculation, pricing reset, and launch-at-login controls.
 - Version display and update checks against GitHub Releases.
 
 ## Settings
 
-The Settings window lets you configure menu bar display, refresh behavior, launch at login, token and cost budgets, maintenance actions, and updates.
+The Settings window lets you configure menu bar display, language, refresh behavior, launch at login, token and cost budgets, maintenance actions, and updates.
 
 <img src="docs/assets/agentbar-settings.png" alt="AgentBar settings" width="560">
 
@@ -223,6 +225,11 @@ swift test
 ```
 
 For UI changes, include a screenshot or short note describing what changed in the menu bar panel or Settings window.
+
+## Credits
+
+- [varenyzc](https://github.com/varenyzc1/agentbar)
+- [ZengWenJian123](https://github.com/ZengWenJian123)
 
 ## License
 
