@@ -72,15 +72,17 @@ open .build/AgentBar.app
 - 支持配额、提醒、本地使用量等菜单栏显示模式。
 - 显示 Codex 5 小时和 7 天滚动窗口配额。
 - 汇总今日、近 7 天和全部使用量。
+- 在用量摘要卡片底层显示折线趋势，用来观察时间和用量变化。
 - 按来源展示使用量，例如 Codex、Claude Code。
-- 365 天活动热力图。
+- 365 天活动热力图，并带有 GitHub 风格的错峰打开动画。
+- 可在设置页切换英文和简体中文界面。
 - 基于价格表估算费用，并支持预算设置。
 - 支持手动扫描、费用重算、价格重置和开机启动。
 - 显示当前版本，并可检查 GitHub Releases 中的新版本。
 
 ## 设置
 
-设置页可以配置菜单栏显示内容、刷新行为、开机启动、token 与费用预算、维护操作和更新检查。
+设置页可以配置菜单栏显示内容、界面语言、刷新行为、开机启动、token 与费用预算、维护操作和更新检查。
 
 <img src="docs/assets/agentbar-settings.png" alt="AgentBar 设置" width="560">
 
@@ -221,6 +223,11 @@ swift test
 ```
 
 如果改动涉及界面，请在 PR 中附上截图，或简单说明菜单栏面板/设置页发生了哪些变化。
+
+## 致谢
+
+- [varenyzc](https://github.com/varenyzc1/agentbar)
+- [ZengWenJian123](https://github.com/ZengWenJian123)
 
 ## License
 

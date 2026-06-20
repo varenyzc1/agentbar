@@ -53,6 +53,7 @@ struct MenuBarLabelView: View {
 struct MenuBarPanelView: View {
     @ObservedObject var model: AgentBarModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var openingAnimationID = 0
 
     private static let panelWidth: CGFloat = 500
     private var copy: AgentBarCopy {
@@ -71,7 +72,11 @@ struct MenuBarPanelView: View {
                 now: Date(),
                 language: model.settings.language
             )
-            UsageHeatmapView(days: model.usageSummary.heatmapDays, language: model.settings.language)
+            UsageHeatmapView(
+                days: model.usageSummary.heatmapDays,
+                language: model.settings.language,
+                animationID: openingAnimationID
+            )
             SourceBreakdownView(sources: model.usageSummary.sourceBreakdown7Days, language: model.settings.language)
             footer
         }
@@ -79,8 +84,16 @@ struct MenuBarPanelView: View {
         .padding(16)
         .agentBarPanelBackground()
         .onAppear {
+            replayOpeningEffects()
             model.popoverOpened()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            replayOpeningEffects()
+        }
+    }
+
+    private func replayOpeningEffects() {
+        openingAnimationID += 1
     }
 
     private var header: some View {
@@ -480,19 +493,38 @@ struct UsageTotalsView: View {
             UsageTotalTile(
                 title: copy.today,
                 tokens: summary.today.totalTokens,
-                cost: summary.today.costUSD
+                cost: summary.today.costUSD,
+                trend: trend(days: Array(summary.heatmapDays.suffix(7)))
             )
             UsageTotalTile(
                 title: copy.sevenDaysShort,
                 tokens: summary.sevenDayTokens,
-                cost: summary.sevenDayCostUSD
+                cost: summary.sevenDayCostUSD,
+                trend: trend(days: Array(summary.heatmapDays.suffix(14)))
             )
             UsageTotalTile(
                 title: copy.all,
                 tokens: summary.allTimeTokens,
-                cost: summary.allTimeCostUSD
+                cost: summary.allTimeCostUSD,
+                trend: trend(days: sampledAllTimeDays)
             )
         }
+    }
+
+    private var sampledAllTimeDays: [HeatmapDay] {
+        let days = summary.heatmapDays
+        guard days.count > 18 else { return days }
+        return (0..<18).map { index in
+            let sourceIndex = Int((Double(index) / 17.0) * Double(days.count - 1))
+            return days[sourceIndex]
+        }
+    }
+
+    private func trend(days: [HeatmapDay]) -> UsageTileTrend {
+        UsageTileTrend(
+            tokens: days.map { Double($0.tokens) },
+            costs: days.map(\.costUSD)
+        )
     }
 }
 
@@ -500,21 +532,105 @@ struct UsageTotalTile: View {
     let title: String
     let tokens: Int64
     let cost: Double?
+    let trend: UsageTileTrend
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .agentBarSecondaryText()
-            Text(AgentBarFormatters.compactTokens(tokens))
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-            Text(AgentBarFormatters.usd(cost))
-                .font(.caption.monospacedDigit())
-                .agentBarSecondaryText()
+        ZStack(alignment: .leading) {
+            UsageTileSparkline(trend: trend)
+                .padding(.top, 26)
+                .padding(.horizontal, 4)
+                .opacity(colorScheme == .dark ? 0.44 : 0.34)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .agentBarSecondaryText()
+                Text(AgentBarFormatters.compactTokens(tokens))
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                Text(AgentBarFormatters.usd(cost))
+                    .font(.caption.monospacedDigit())
+                    .agentBarSecondaryText()
+            }
+            .shadow(color: AgentBarStyle.cardBackground(colorScheme).opacity(0.76), radius: 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 72, alignment: .leading)
         .agentBarCard()
+    }
+}
+
+struct UsageTileTrend {
+    let tokens: [Double]
+    let costs: [Double]
+}
+
+private struct UsageTileSparkline: View {
+    let trend: UsageTileTrend
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                sparkline(values: trend.costs, in: proxy.size, verticalOffset: 12)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.96, green: 0.48, blue: 0.68),
+                                Color(red: 0.98, green: 0.64, blue: 0.22)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round)
+                    )
+                sparkline(values: trend.tokens, in: proxy.size, verticalOffset: 0)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.30, green: 0.66, blue: 0.88),
+                                AgentBarStyle.green
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
+                    )
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func sparkline(values: [Double], in size: CGSize, verticalOffset: CGFloat) -> Path {
+        let normalized = normalizedValues(values)
+        guard normalized.count > 1, size.width > 0, size.height > 0 else { return Path() }
+
+        let chartHeight = max(8, size.height - 10)
+        let step = size.width / CGFloat(normalized.count - 1)
+        var path = Path()
+
+        for index in normalized.indices {
+            let x = CGFloat(index) * step
+            let y = 6 + (1 - CGFloat(normalized[index])) * chartHeight * 0.72 + verticalOffset
+            let point = CGPoint(x: x, y: min(size.height - 2, max(2, y)))
+            if index == normalized.startIndex {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+
+        return path
+    }
+
+    private func normalizedValues(_ values: [Double]) -> [Double] {
+        guard values.count > 1 else { return [] }
+        let maxValue = values.max() ?? 0
+        let minValue = values.min() ?? 0
+        guard maxValue > 0, maxValue > minValue else {
+            return values.map { _ in maxValue > 0 ? 0.5 : 0 }
+        }
+        return values.map { ($0 - minValue) / (maxValue - minValue) }
     }
 }
 
@@ -554,8 +670,12 @@ struct TopModelView: View {
 struct UsageHeatmapView: View {
     let days: [HeatmapDay]
     let language: AppLanguage
+    let animationID: Int
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoveredDay: HeatmapDay?
+    @State private var revealsGrid = false
+    @State private var revealGeneration = 0
 
     private let cellSize: CGFloat = 10
     private let cellSpacing: CGFloat = 1
@@ -580,9 +700,14 @@ struct UsageHeatmapView: View {
                             VStack(spacing: cellSpacing) {
                                 ForEach(0..<7, id: \.self) { index in
                                     if index < week.count, let day = week[index] {
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .fill(color(for: day.level))
-                                            .frame(width: cellSize, height: cellSize)
+                                        HeatmapCellView(
+                                            color: color(for: day.level),
+                                            level: day.level,
+                                            isRevealed: revealsGrid,
+                                            delay: revealDelay(weekIndex: weekIndex, dayIndex: index),
+                                            reduceMotion: reduceMotion
+                                        )
+                                        .frame(width: cellSize, height: cellSize)
                                             .help(tooltip(for: day))
                                             .onHover { isHovering in
                                                 hoveredDay = isHovering ? day : nil
@@ -591,7 +716,7 @@ struct UsageHeatmapView: View {
                                         RoundedRectangle(cornerRadius: 2)
                                             .fill(Color.clear)
                                             .frame(width: cellSize, height: cellSize)
-                                        }
+                                    }
                                 }
                             }
                             .id(weekIndex)
@@ -603,9 +728,15 @@ struct UsageHeatmapView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onAppear {
                     scrollToLatest(proxy)
+                    playRevealAnimation()
                 }
                 .onChange(of: weeks.count) { _, _ in
                     scrollToLatest(proxy)
+                    playRevealAnimation()
+                }
+                .onChange(of: animationID) { _, _ in
+                    scrollToLatest(proxy)
+                    playRevealAnimation()
                 }
             }
 
@@ -665,6 +796,32 @@ struct UsageHeatmapView: View {
         }
     }
 
+    private func playRevealAnimation() {
+        guard !reduceMotion else {
+            revealsGrid = true
+            return
+        }
+
+        revealGeneration += 1
+        let generation = revealGeneration
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            revealsGrid = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+            guard generation == revealGeneration else { return }
+            revealsGrid = true
+        }
+    }
+
+    private func revealDelay(weekIndex: Int, dayIndex: Int) -> Double {
+        let latestWeekIndex = max(weeks.count - 1, 0)
+        let distanceFromLatest = max(0, latestWeekIndex - weekIndex)
+        return min(0.72, Double(distanceFromLatest) * 0.012 + Double(dayIndex) * 0.018)
+    }
+
     private func tooltip(for day: HeatmapDay) -> String {
         copy.tooltipTokens(
             day: day.day,
@@ -700,6 +857,31 @@ struct UsageHeatmapView: View {
             return nil
         }
         return trimmed
+    }
+}
+
+private struct HeatmapCellView: View {
+    let color: Color
+    let level: Int
+    let isRevealed: Bool
+    let delay: Double
+    let reduceMotion: Bool
+
+    var body: some View {
+        let visible = isRevealed || reduceMotion
+        RoundedRectangle(cornerRadius: 2)
+            .fill(color)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Color.white.opacity(level > 0 ? 0.14 : 0), lineWidth: 0.5)
+            )
+            .opacity(visible ? 1 : 0)
+            .scaleEffect(visible ? 1 : 0.42)
+            .brightness(visible || level == 0 ? 0 : 0.16)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.78).delay(delay),
+                value: isRevealed
+            )
     }
 }
 

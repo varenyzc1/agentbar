@@ -25,5 +25,12 @@ struct AgentBarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // Ensure only one instance runs at a time.
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        if running.count > 1 {
+            NSApp.terminate(nil)
+        }
     }
 }
