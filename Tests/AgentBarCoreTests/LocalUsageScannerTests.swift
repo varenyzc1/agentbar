@@ -178,6 +178,14 @@ final class LocalUsageScannerTests: XCTestCase {
         XCTAssertEqual(summary.today.costUSD ?? 0, 21.375, accuracy: 0.000_001)
         XCTAssertEqual(summary.heatmapDays.count, 365)
         XCTAssertEqual(summary.heatmapDays.last?.level, 4)
+        XCTAssertEqual(summary.dailyUsageDays.last?.day, "2026-06-13")
+        XCTAssertEqual(summary.dailyUsageDays.last?.totalTokens, 4_000_000)
+        XCTAssertEqual(summary.dailyModelUsageDays.count, 1)
+        XCTAssertEqual(summary.dailyModelUsageDays[0].model, "gpt-5-codex-2026-06")
+        XCTAssertEqual(summary.dailyModelUsageDays[0].inputTokens, 1_000_000)
+        XCTAssertEqual(summary.dailyModelUsageDays[0].outputTokens, 1_000_000)
+        XCTAssertEqual(summary.dailyModelUsageDays[0].cachedInputTokens, 1_000_000)
+        XCTAssertEqual(summary.dailyModelUsageDays[0].reasoningOutputTokens, 1_000_000)
     }
 
     func testSettingsStoreWritesSettingsJSON() throws {

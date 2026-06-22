@@ -54,17 +54,60 @@ struct MenuBarPanelView: View {
     @ObservedObject var model: AgentBarModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var openingAnimationID = 0
+    @State private var selectedUsageRange: UsagePanelRange = .sevenDays
+    @State private var topModelLimit: TopModelLimit = .three
+    @State private var customStartDate = Date().addingTimeInterval(-29 * 86_400)
+    @State private var customEndDate = Date()
 
     private static let panelWidth: CGFloat = 500
+    private static let panelPadding: CGFloat = 16
+    private static let panelOuterWidth = panelWidth + panelPadding * 2
     private var copy: AgentBarCopy {
         AgentBarCopy(language: model.settings.language)
     }
 
     var body: some View {
+        let usageWindow = selectedUsageWindow
+        ScrollView(.vertical, showsIndicators: true) {
+            panelContent(usageWindow: usageWindow)
+                .frame(width: Self.panelWidth, alignment: .leading)
+                .padding(Self.panelPadding)
+        }
+        .frame(width: Self.panelOuterWidth, height: panelMaxHeight, alignment: .top)
+        .agentBarPanelBackground()
+        .onAppear {
+            replayOpeningEffects()
+            model.popoverOpened()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            replayOpeningEffects()
+        }
+    }
+
+    private var panelMaxHeight: CGFloat {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+        let visibleHeight = screen?.visibleFrame.height ?? 760
+        return max(420, visibleHeight - 72)
+    }
+
+    private func panelContent(usageWindow: UsageWindowSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            UsageTotalsView(summary: model.usageSummary, language: model.settings.language)
-            TopModelView(modelUsage: model.usageSummary.topModel7Days, language: model.settings.language)
+            UsageRangeControlView(
+                selection: $selectedUsageRange,
+                customStartDate: $customStartDate,
+                customEndDate: $customEndDate,
+                language: model.settings.language
+            )
+            UsageWindowSummaryView(window: usageWindow, language: model.settings.language)
+            ModelUsageDetailsView(
+                models: usageWindow.topModels(limit: topModelLimit.count),
+                topLimit: $topModelLimit,
+                language: model.settings.language
+            )
+            UsageThirtyDayBarChartView(days: recentThirtyDayUsage, language: model.settings.language)
+                .zIndex(2)
             CodexQuotaCardView(
                 state: model.quotaState,
                 quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
@@ -80,20 +123,57 @@ struct MenuBarPanelView: View {
             SourceBreakdownView(sources: model.usageSummary.sourceBreakdown7Days, language: model.settings.language)
             footer
         }
-        .frame(width: Self.panelWidth, alignment: .leading)
-        .padding(16)
-        .agentBarPanelBackground()
-        .onAppear {
-            replayOpeningEffects()
-            model.popoverOpened()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            replayOpeningEffects()
-        }
     }
 
     private func replayOpeningEffects() {
         openingAnimationID += 1
+    }
+
+    private var selectedUsageWindow: UsageWindowSnapshot {
+        let calendar = Calendar.agentBarCalendar(timeZone: model.settings.timeZone)
+        let today = calendar.startOfDay(for: Date())
+        let range = selectedUsageRange.dateRange(
+            today: today,
+            calendar: calendar,
+            customStart: customStartDate,
+            customEnd: customEndDate
+        )
+        return UsageWindowSnapshot(
+            range: selectedUsageRange,
+            startDate: range.start,
+            endDate: range.end,
+            days: denseUsageDays(start: range.start, end: range.end, calendar: calendar),
+            modelDays: filteredModelUsage(start: range.start, end: range.end, calendar: calendar)
+        )
+    }
+
+    private var recentThirtyDayUsage: [DailyUsage] {
+        let calendar = Calendar.agentBarCalendar(timeZone: model.settings.timeZone)
+        let today = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
+        return denseUsageDays(start: start, end: today, calendar: calendar)
+    }
+
+    private func denseUsageDays(start: Date, end: Date, calendar: Calendar) -> [DailyUsage] {
+        var byDay: [String: DailyUsage] = [:]
+        for day in model.usageSummary.dailyUsageDays {
+            byDay[day.day] = (byDay[day.day] ?? DailyUsage(day: day.day)).merging(day)
+        }
+        let dayCount = max(1, min(366, (calendar.dateComponents([.day], from: start, to: end).day ?? 0) + 1))
+        return (0..<dayCount).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            let key = UsageAggregator.dayString(for: date, timeZone: calendar.timeZone)
+            return byDay[key] ?? DailyUsage(day: key)
+        }
+    }
+
+    private func filteredModelUsage(start: Date, end: Date, calendar: Calendar) -> [DailyModelUsage] {
+        model.usageSummary.dailyModelUsageDays.filter { usage in
+            guard let date = UsageAggregator.date(fromDayString: usage.day, timeZone: calendar.timeZone) else {
+                return false
+            }
+            return date >= start && date <= end
+        }
     }
 
     private var header: some View {
@@ -477,6 +557,539 @@ struct MeterRowView: View {
             return window.resetsAt.formatted(date: .omitted, time: .shortened)
         }
         return window.resetsAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+enum UsagePanelRange: String, CaseIterable, Identifiable, Hashable {
+    case today
+    case sevenDays
+    case thirtyDays
+    case custom
+
+    var id: String { rawValue }
+
+    func title(copy: AgentBarCopy) -> String {
+        switch self {
+        case .today:
+            return copy.today
+        case .sevenDays:
+            return copy.sevenDaysShort
+        case .thirtyDays:
+            return copy.thirtyDays
+        case .custom:
+            return copy.custom
+        }
+    }
+
+    func dateRange(today: Date, calendar: Calendar, customStart: Date, customEnd: Date) -> (start: Date, end: Date) {
+        switch self {
+        case .today:
+            return (today, today)
+        case .sevenDays:
+            return (calendar.date(byAdding: .day, value: -6, to: today) ?? today, today)
+        case .thirtyDays:
+            return (calendar.date(byAdding: .day, value: -29, to: today) ?? today, today)
+        case .custom:
+            let start = calendar.startOfDay(for: customStart)
+            let end = calendar.startOfDay(for: customEnd)
+            return start <= end ? (start, end) : (end, start)
+        }
+    }
+}
+
+enum TopModelLimit: String, CaseIterable, Identifiable, Hashable {
+    case three
+    case five
+
+    var id: String { rawValue }
+    var count: Int { self == .three ? 3 : 5 }
+
+    func title(copy: AgentBarCopy) -> String {
+        self == .three ? copy.top3 : copy.top5
+    }
+}
+
+struct UsageWindowSnapshot {
+    let range: UsagePanelRange
+    let startDate: Date
+    let endDate: Date
+    let days: [DailyUsage]
+    let modelDays: [DailyModelUsage]
+
+    var total: DailyUsage {
+        days.reduce(DailyUsage(day: "range")) { $0.merging($1) }
+    }
+
+    var costUSD: Double? {
+        let totalCost = days.compactMap(\.costUSD).reduce(0, +)
+        return days.contains { $0.costUSD != nil } ? totalCost : nil
+    }
+
+    func topModels(limit: Int) -> [ModelUsageBreakdown] {
+        var byModel: [String: ModelUsageBreakdown] = [:]
+        for day in modelDays {
+            byModel[day.model, default: ModelUsageBreakdown(model: day.model)].add(day)
+        }
+        return byModel.values
+            .sorted { left, right in
+                if left.totalTokens == right.totalTokens {
+                    return left.model < right.model
+                }
+                return left.totalTokens > right.totalTokens
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+}
+
+struct ModelUsageBreakdown: Identifiable {
+    var id: String { model }
+
+    let model: String
+    var inputTokens: Int64 = 0
+    var outputTokens: Int64 = 0
+    var cachedInputTokens: Int64 = 0
+    var cacheCreationInputTokens: Int64 = 0
+    var reasoningOutputTokens: Int64 = 0
+    var costUSD: Double = 0
+
+    var cachedTokens: Int64 {
+        cachedInputTokens + cacheCreationInputTokens
+    }
+
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + cachedTokens + reasoningOutputTokens
+    }
+
+    mutating func add(_ usage: DailyModelUsage) {
+        inputTokens += usage.inputTokens
+        outputTokens += usage.outputTokens
+        cachedInputTokens += usage.cachedInputTokens
+        cacheCreationInputTokens += usage.cacheCreationInputTokens
+        reasoningOutputTokens += usage.reasoningOutputTokens
+        costUSD += usage.costUSD
+    }
+}
+
+private extension Calendar {
+    static func agentBarCalendar(timeZone: TimeZone) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }
+}
+
+struct UsageRangeControlView: View {
+    @Binding var selection: UsagePanelRange
+    @Binding var customStartDate: Date
+    @Binding var customEndDate: Date
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(copy.range)
+                    .font(.caption.weight(.semibold))
+                    .agentBarSecondaryText()
+                    .frame(width: 42, alignment: .leading)
+                AgentBarSegmentedPicker(
+                    options: UsagePanelRange.allCases,
+                    selection: $selection,
+                    title: { $0.title(copy: copy) }
+                )
+                .frame(maxWidth: 300, alignment: .leading)
+                Spacer(minLength: 0)
+            }
+
+            if selection == .custom {
+                HStack(spacing: 8) {
+                    compactDatePicker(copy.start, date: $customStartDate)
+                    compactDatePicker(copy.end, date: $customEndDate)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .agentBarCard()
+    }
+
+    private func compactDatePicker(_ title: String, date: Binding<Date>) -> some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.caption2.weight(.medium))
+                .agentBarSecondaryText()
+            DatePicker("", selection: date, displayedComponents: .date)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .frame(width: 116)
+        }
+    }
+}
+
+struct UsageWindowSummaryView: View {
+    let window: UsageWindowSnapshot
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            metricTile(title: copy.total, value: AgentBarFormatters.compactTokens(window.total.totalTokens), footnote: AgentBarFormatters.usd(window.costUSD))
+            metricTile(title: copy.input, value: AgentBarFormatters.compactTokens(window.total.inputTokens), footnote: nil)
+            metricTile(title: copy.output, value: AgentBarFormatters.compactTokens(outputTokens), footnote: nil)
+            metricTile(title: copy.cached, value: AgentBarFormatters.compactTokens(cachedTokens), footnote: cacheRateText)
+        }
+    }
+
+    private var outputTokens: Int64 {
+        window.total.outputTokens + window.total.reasoningOutputTokens
+    }
+
+    private var cachedTokens: Int64 {
+        window.total.cachedInputTokens + window.total.cacheCreationInputTokens
+    }
+
+    private var cacheRateText: String? {
+        guard window.total.totalTokens > 0 else { return nil }
+        return AgentBarFormatters.percent(Double(cachedTokens) / Double(window.total.totalTokens) * 100)
+    }
+
+    private func metricTile(title: String, value: String, footnote: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .agentBarSecondaryText()
+            Text(value)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+            Text(footnote ?? " ")
+                .font(.caption2.monospacedDigit())
+                .agentBarSecondaryText()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .agentBarCard()
+    }
+}
+
+struct ModelUsageDetailsView: View {
+    let models: [ModelUsageBreakdown]
+    @Binding var topLimit: TopModelLimit
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(copy.topModels)
+                    .font(.caption.weight(.semibold))
+                    .agentBarSecondaryText()
+                Spacer()
+                AgentBarSegmentedPicker(
+                    options: TopModelLimit.allCases,
+                    selection: $topLimit,
+                    title: { $0.title(copy: copy) }
+                )
+                .frame(width: 112)
+            }
+
+            if models.isEmpty {
+                Text(copy.noLocalUsageYet)
+                    .font(.callout)
+                    .agentBarSecondaryText()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(models) { model in
+                    ModelUsageDetailRow(model: model, maxTokens: maxTokens, language: language)
+                }
+            }
+        }
+        .agentBarCard()
+    }
+
+    private var maxTokens: Int64 {
+        max(models.map(\.totalTokens).max() ?? 0, 1)
+    }
+}
+
+private struct ModelUsageDetailRow: View {
+    let model: ModelUsageBreakdown
+    let maxTokens: Int64
+    let language: AppLanguage
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(model.model)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(AgentBarFormatters.compactTokens(model.totalTokens)) · \(AgentBarFormatters.usd(model.costUSD))")
+                    .font(.caption.monospacedDigit())
+                    .agentBarSecondaryText()
+            }
+
+            AgentBarProgressBar(value: Double(model.totalTokens) / Double(maxTokens), tint: AgentBarStyle.green)
+
+            HStack(spacing: 10) {
+                tokenPart(copy.input, model.inputTokens)
+                tokenPart(copy.output, model.outputTokens + model.reasoningOutputTokens)
+                tokenPart(copy.cached, model.cachedTokens)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func tokenPart(_ title: String, _ value: Int64) -> some View {
+        Text("\(title) \(AgentBarFormatters.compactTokens(value))")
+            .font(.caption2.monospacedDigit())
+            .agentBarSecondaryText()
+            .lineLimit(1)
+    }
+}
+
+struct UsageThirtyDayBarChartView: View {
+    let days: [DailyUsage]
+    let language: AppLanguage
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hoveredDay: DailyUsage?
+
+    private let inputColor = Color(red: 0.32, green: 0.60, blue: 0.95)
+    private let outputColor = Color(red: 0.95, green: 0.47, blue: 0.64)
+    private let cachedColor = AgentBarStyle.green
+    private let hoverCardWidth: CGFloat = 150
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(copy.trend30Days)
+                    .font(.caption.weight(.semibold))
+                    .agentBarSecondaryText()
+                Spacer()
+                Text("\(AgentBarFormatters.compactTokens(totalTokens)) · \(AgentBarFormatters.usd(totalCost))")
+                    .font(.caption.monospacedDigit())
+                    .agentBarSecondaryText()
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .topLeading) {
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(days) { day in
+                            stackedBar(day: day, maxTokens: maxTokens, isHovered: hoveredDay?.day == day.day)
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .onHover { isHovering in
+                                    if isHovering {
+                                        hoveredDay = day
+                                    } else if hoveredDay?.day == day.day {
+                                        hoveredDay = nil
+                                    }
+                                }
+                                .help("\(displayDay(day.day)) · \(AgentBarFormatters.compactTokens(day.totalTokens)) · \(AgentBarFormatters.usd(day.costUSD))")
+                        }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+
+                    if let hoveredDay {
+                        UsageDayHoverCard(
+                            day: hoveredDay,
+                            language: language,
+                            inputColor: inputColor,
+                            outputColor: outputColor,
+                            cachedColor: cachedColor
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                        .offset(x: hoverCardX(for: hoveredDay, chartWidth: proxy.size.width), y: 2)
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: hoveredDay?.day)
+            }
+            .frame(height: 56)
+        }
+        .agentBarCard(padding: 8)
+    }
+
+    private var totalTokens: Int64 {
+        days.reduce(Int64(0)) { $0 + $1.totalTokens }
+    }
+
+    private var totalCost: Double? {
+        let values = days.compactMap(\.costUSD)
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+
+    private var maxTokens: Int64 {
+        max(days.map(\.totalTokens).max() ?? 0, 1)
+    }
+
+    private func stackedBar(day: DailyUsage, maxTokens: Int64, isHovered: Bool) -> some View {
+        let heightRatio = max(0.02, Double(day.totalTokens) / Double(maxTokens))
+        return GeometryReader { proxy in
+            let barHeight = max(2, proxy.size.height * heightRatio)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    segment(tokens: day.outputTokens + day.reasoningOutputTokens, total: day.totalTokens, barHeight: barHeight, color: outputColor)
+                    segment(tokens: day.inputTokens, total: day.totalTokens, barHeight: barHeight, color: inputColor)
+                    segment(tokens: day.cachedInputTokens + day.cacheCreationInputTokens, total: day.totalTokens, barHeight: barHeight, color: cachedColor)
+                }
+                .frame(height: barHeight)
+                .frame(maxWidth: .infinity)
+                .background(AgentBarStyle.track(colorScheme).opacity(day.totalTokens > 0 ? 0.18 : 0.32))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .circular)
+                        .stroke(isHovered ? AgentBarStyle.primaryText(colorScheme).opacity(0.78) : Color.clear, lineWidth: 1.2)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .circular))
+                .scaleEffect(x: isHovered ? 1.25 : 1, y: isHovered ? 1.04 : 1, anchor: .bottom)
+                .shadow(color: isHovered ? AgentBarStyle.primaryText(colorScheme).opacity(0.18) : .clear, radius: 5, y: 1)
+            }
+        }
+    }
+
+    private func segment(tokens: Int64, total: Int64, barHeight: CGFloat, color: Color) -> some View {
+        let ratio = total > 0 ? Double(tokens) / Double(total) : 0
+        return Rectangle()
+            .fill(color)
+            .frame(height: max(0, barHeight * ratio))
+    }
+
+    private func hoverCardX(for day: DailyUsage, chartWidth: CGFloat) -> CGFloat {
+        guard chartWidth > hoverCardWidth else { return 0 }
+        let dayCount = max(days.count, 1)
+        let index = days.firstIndex { $0.day == day.day } ?? dayCount - 1
+        let columnWidth = chartWidth / CGFloat(dayCount)
+        let selectedCenterX = (CGFloat(index) + 0.5) * columnWidth
+        if selectedCenterX < chartWidth / 2 {
+            let x = selectedCenterX + columnWidth * 1.5
+            return min(max(2, x), chartWidth - hoverCardWidth - 2)
+        }
+        return 2
+    }
+
+    private func displayDay(_ day: String) -> String {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3,
+              let month = Int(parts[1]),
+              let dayOfMonth = Int(parts[2]) else {
+            return day
+        }
+        if language == .simplifiedChinese {
+            return "\(month)月\(dayOfMonth)日"
+        }
+        return "\(month)/\(dayOfMonth)"
+    }
+}
+
+struct UsageDayHoverCard: View {
+    let day: DailyUsage
+    let language: AppLanguage
+    let inputColor: Color
+    let outputColor: Color
+    let cachedColor: Color
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var copy: AgentBarCopy {
+        AgentBarCopy(language: language)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(displayDay(day.day))
+                    .font(.caption.weight(.semibold))
+                    .agentBarPrimaryText()
+                Spacer(minLength: 10)
+                Text(AgentBarFormatters.usd(day.costUSD))
+                    .font(.caption2.monospacedDigit())
+                    .agentBarSecondaryText()
+            }
+
+            miniStack
+                .frame(height: 7)
+
+            VStack(alignment: .leading, spacing: 4) {
+                metricRow(title: copy.total, value: day.totalTokens, color: AgentBarStyle.primaryText(colorScheme))
+                metricRow(title: copy.input, value: day.inputTokens, color: inputColor)
+                metricRow(title: copy.output, value: day.outputTokens + day.reasoningOutputTokens, color: outputColor)
+                metricRow(title: copy.cached, value: day.cachedInputTokens + day.cacheCreationInputTokens, color: cachedColor)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(width: 150)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .circular)
+                .fill(AgentBarStyle.raisedBackground(colorScheme))
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.10), radius: 10, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .circular)
+                .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
+        )
+    }
+
+    private var miniStack: some View {
+        GeometryReader { proxy in
+            let total = max(day.totalTokens, 1)
+            let cachedWidth = proxy.size.width * CGFloat(Double(day.cachedInputTokens + day.cacheCreationInputTokens) / Double(total))
+            let inputWidth = proxy.size.width * CGFloat(Double(day.inputTokens) / Double(total))
+            let outputWidth = proxy.size.width * CGFloat(Double(day.outputTokens + day.reasoningOutputTokens) / Double(total))
+            HStack(spacing: 0) {
+                cachedColor.frame(width: cachedWidth)
+                inputColor.frame(width: inputWidth)
+                outputColor.frame(width: outputWidth)
+                AgentBarStyle.track(colorScheme)
+                    .frame(width: max(0, proxy.size.width - cachedWidth - inputWidth - outputWidth))
+            }
+            .clipShape(Capsule())
+        }
+    }
+
+    private func metricRow(title: String, value: Int64, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .agentBarSecondaryText()
+            Spacer(minLength: 8)
+            Text(AgentBarFormatters.compactTokens(value))
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .agentBarPrimaryText()
+        }
+    }
+
+    private func displayDay(_ day: String) -> String {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3,
+              let month = Int(parts[1]),
+              let dayOfMonth = Int(parts[2]) else {
+            return day
+        }
+        if language == .simplifiedChinese {
+            return "\(month)月\(dayOfMonth)日"
+        }
+        return "\(month)/\(dayOfMonth)"
     }
 }
 

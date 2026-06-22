@@ -55,7 +55,8 @@ public enum UsageAggregator {
             monthTokens: monthTokens,
             monthCostUSD: monthCost,
             quota: quota,
-            heatmapDays: heatmap(daysByKey: byDay, today: todayDate, calendar: calendar)
+            heatmapDays: heatmap(daysByKey: byDay, today: todayDate, calendar: calendar),
+            dailyUsageDays: days.sorted { $0.day < $1.day }
         )
     }
 

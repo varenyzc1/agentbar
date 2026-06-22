@@ -10,7 +10,7 @@
 
 AgentBar is a local-first macOS menu bar app for tracking AI coding assistant usage. It scans usage records on your Mac, estimates token and cost totals, and shows local usage plus Codex quota progress directly in the menu bar.
 
-<img src="docs/assets/agentbar-dashboard.png" alt="AgentBar dashboard" width="420">
+<img src="docs/assets/Snipaste_2026-06-21_17-01-19.png" alt="AgentBar dashboard" width="420">
 
 ## Why AgentBar
 

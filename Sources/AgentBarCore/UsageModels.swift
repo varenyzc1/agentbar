@@ -188,6 +188,47 @@ public struct SourceUsage: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct DailyModelUsage: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { "\(day):\(model)" }
+
+    public let day: String
+    public let model: String
+    public let inputTokens: Int64
+    public let outputTokens: Int64
+    public let cachedInputTokens: Int64
+    public let cacheCreationInputTokens: Int64
+    public let reasoningOutputTokens: Int64
+    public let costUSD: Double
+
+    public init(
+        day: String,
+        model: String,
+        inputTokens: Int64 = 0,
+        outputTokens: Int64 = 0,
+        cachedInputTokens: Int64 = 0,
+        cacheCreationInputTokens: Int64 = 0,
+        reasoningOutputTokens: Int64 = 0,
+        costUSD: Double = 0
+    ) {
+        self.day = day
+        self.model = model.isEmpty ? "unknown" : model
+        self.inputTokens = max(0, inputTokens)
+        self.outputTokens = max(0, outputTokens)
+        self.cachedInputTokens = max(0, cachedInputTokens)
+        self.cacheCreationInputTokens = max(0, cacheCreationInputTokens)
+        self.reasoningOutputTokens = max(0, reasoningOutputTokens)
+        self.costUSD = costUSD
+    }
+
+    public var totalTokens: Int64 {
+        inputTokens
+            + outputTokens
+            + cachedInputTokens
+            + cacheCreationInputTokens
+            + reasoningOutputTokens
+    }
+}
+
 public struct QuotaSnapshot: Codable, Equatable, Sendable {
     public let tokenBudget: Int?
     public let costBudgetUSD: Double?
@@ -230,6 +271,8 @@ public struct UsageSummary: Codable, Equatable, Sendable {
     public let topModel7Days: ModelUsage?
     public let todayTopModel: ModelUsage?
     public let sourceBreakdown7Days: [SourceUsage]
+    public let dailyUsageDays: [DailyUsage]
+    public let dailyModelUsageDays: [DailyModelUsage]
 
     public init(
         today: DailyUsage,
@@ -243,7 +286,9 @@ public struct UsageSummary: Codable, Equatable, Sendable {
         heatmapDays: [HeatmapDay],
         topModel7Days: ModelUsage? = nil,
         todayTopModel: ModelUsage? = nil,
-        sourceBreakdown7Days: [SourceUsage] = []
+        sourceBreakdown7Days: [SourceUsage] = [],
+        dailyUsageDays: [DailyUsage] = [],
+        dailyModelUsageDays: [DailyModelUsage] = []
     ) {
         self.today = today
         self.sevenDayTokens = sevenDayTokens
@@ -257,6 +302,8 @@ public struct UsageSummary: Codable, Equatable, Sendable {
         self.topModel7Days = topModel7Days
         self.todayTopModel = todayTopModel
         self.sourceBreakdown7Days = sourceBreakdown7Days
+        self.dailyUsageDays = dailyUsageDays
+        self.dailyModelUsageDays = dailyModelUsageDays
     }
 
     public static var empty: UsageSummary {

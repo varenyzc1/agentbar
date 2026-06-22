@@ -206,6 +206,8 @@ public final class UsageDatabase: @unchecked Sendable {
             let todayTopModel = try topModelUnlocked(whereClause: "bucket_date_local = ?", values: [todayKey])
             let sourceBreakdown = try sourceBreakdownUnlocked(startDay: sevenDayStart)
             let heatmapDays = try heatmapUnlocked(startDay: heatmapStart, today: todayDate, calendar: calendar)
+            let dailyUsageDays = try dailyUsageUnlocked(startDay: heatmapStart)
+            let dailyModelUsageDays = try dailyModelUsageUnlocked(startDay: heatmapStart)
 
             let quota = QuotaSnapshot(
                 tokenBudget: settings.monthlyTokenBudget,
@@ -228,7 +230,9 @@ public final class UsageDatabase: @unchecked Sendable {
                 heatmapDays: heatmapDays,
                 topModel7Days: topModel7Days,
                 todayTopModel: todayTopModel,
-                sourceBreakdown7Days: sourceBreakdown
+                sourceBreakdown7Days: sourceBreakdown,
+                dailyUsageDays: dailyUsageDays,
+                dailyModelUsageDays: dailyModelUsageDays
             )
         }
     }
@@ -634,6 +638,84 @@ public final class UsageDatabase: @unchecked Sendable {
                         source: columnString(statement, 0),
                         tokens: sqlite3_column_int64(statement, 1),
                         costUSD: sqlite3_column_double(statement, 2)
+                    )
+                )
+            }
+        )
+        return rows
+    }
+
+    private func dailyUsageUnlocked(startDay: String) throws -> [DailyUsage] {
+        var rows: [DailyUsage] = []
+        try queryUnlocked(
+            """
+            SELECT bucket_date_local,
+                   SUM(input_tokens),
+                   SUM(output_tokens),
+                   SUM(cached_input_tokens),
+                   SUM(cache_creation_input_tokens),
+                   SUM(reasoning_output_tokens),
+                   SUM(estimated_cost_usd),
+                   COUNT(*)
+            FROM usage_buckets
+            WHERE bucket_date_local >= ?
+            GROUP BY bucket_date_local
+            ORDER BY bucket_date_local ASC;
+            """,
+            bind: { statement in
+                try bindText(startDay, to: statement, at: 1)
+            },
+            row: { statement in
+                rows.append(
+                    DailyUsage(
+                        day: columnString(statement, 0),
+                        inputTokens: sqlite3_column_int64(statement, 1),
+                        outputTokens: sqlite3_column_int64(statement, 2),
+                        cachedInputTokens: sqlite3_column_int64(statement, 3),
+                        cacheCreationInputTokens: sqlite3_column_int64(statement, 4),
+                        reasoningOutputTokens: sqlite3_column_int64(statement, 5),
+                        requestCount: Int(sqlite3_column_int(statement, 7)),
+                        costUSD: sqlite3_column_double(statement, 6)
+                    )
+                )
+            }
+        )
+        return rows
+    }
+
+    private func dailyModelUsageUnlocked(startDay: String) throws -> [DailyModelUsage] {
+        var rows: [DailyModelUsage] = []
+        try queryUnlocked(
+            """
+            SELECT bucket_date_local,
+                   model,
+                   SUM(input_tokens),
+                   SUM(output_tokens),
+                   SUM(cached_input_tokens),
+                   SUM(cache_creation_input_tokens),
+                   SUM(reasoning_output_tokens),
+                   SUM(estimated_cost_usd)
+            FROM usage_buckets
+            WHERE bucket_date_local >= ?
+              AND TRIM(LOWER(model)) != 'unknown'
+              AND TRIM(model) != ''
+            GROUP BY bucket_date_local, model
+            ORDER BY bucket_date_local ASC, model ASC;
+            """,
+            bind: { statement in
+                try bindText(startDay, to: statement, at: 1)
+            },
+            row: { statement in
+                rows.append(
+                    DailyModelUsage(
+                        day: columnString(statement, 0),
+                        model: columnString(statement, 1),
+                        inputTokens: sqlite3_column_int64(statement, 2),
+                        outputTokens: sqlite3_column_int64(statement, 3),
+                        cachedInputTokens: sqlite3_column_int64(statement, 4),
+                        cacheCreationInputTokens: sqlite3_column_int64(statement, 5),
+                        reasoningOutputTokens: sqlite3_column_int64(statement, 6),
+                        costUSD: sqlite3_column_double(statement, 7)
                     )
                 )
             }

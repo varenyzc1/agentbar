@@ -53,6 +53,19 @@ struct AgentBarCopy {
     var noBudget: String { text("No budget", "未设置预算") }
     var noModel: String { text("no model", "无模型") }
     var used: String { text("used", "已用") }
+    var custom: String { text("Custom", "自定义") }
+    var thirtyDays: String { text("30D", "30 天") }
+    var range: String { text("Range", "范围") }
+    var total: String { text("Total", "总计") }
+    var input: String { text("Input", "输入") }
+    var output: String { text("Output", "输出") }
+    var cached: String { text("Cached", "缓存") }
+    var topModels: String { text("Top Models", "模型用量明细") }
+    var trend30Days: String { text("30 Day Trend", "近 30 天趋势") }
+    var top3: String { text("Top 3", "Top 3") }
+    var top5: String { text("Top 5", "Top 5") }
+    var start: String { text("Start", "开始") }
+    var end: String { text("End", "结束") }
 
     func menuModeTitle(_ mode: CodexMenuBarMode) -> String {
         switch mode {
