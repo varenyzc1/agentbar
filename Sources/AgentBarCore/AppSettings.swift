@@ -70,6 +70,23 @@ public enum AppLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum PanelModule: String, Codable, CaseIterable, Identifiable, Sendable {
+    case summary
+    case details
+    case trend
+    case codexQuota
+    case heatmap
+
+    public var id: String { rawValue }
+
+    public static let defaults: [PanelModule] = allCases
+
+    public static func normalized(_ modules: [PanelModule]) -> [PanelModule] {
+        let selected = Set(modules)
+        return allCases.filter { selected.contains($0) }
+    }
+}
+
 public struct CodexMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable {
     public var id: CodexQuotaKey { key }
 
@@ -111,6 +128,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var codexMenuBarMode: CodexMenuBarMode
     public var codexMenuBarQuotaItems: [CodexMenuBarQuotaItem]
     public var codexMenuBarShowsQuotaLabels: Bool
+    public var visiblePanelModules: [PanelModule]
     public var refreshIntervalMinutes: Int
     public var codexRefreshIntervalSeconds: Int
     public var monthlyTokenBudget: Int?
@@ -130,6 +148,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         codexMenuBarMode: CodexMenuBarMode = .plan,
         codexMenuBarQuotaItems: [CodexMenuBarQuotaItem] = CodexMenuBarQuotaItem.defaults,
         codexMenuBarShowsQuotaLabels: Bool = true,
+        visiblePanelModules: [PanelModule] = PanelModule.defaults,
         refreshIntervalMinutes: Int = 30,
         codexRefreshIntervalSeconds: Int = 300,
         monthlyTokenBudget: Int? = nil,
@@ -148,6 +167,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.codexMenuBarMode = codexMenuBarMode
         self.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(codexMenuBarQuotaItems)
         self.codexMenuBarShowsQuotaLabels = codexMenuBarShowsQuotaLabels
+        self.visiblePanelModules = PanelModule.normalized(visiblePanelModules)
         self.refreshIntervalMinutes = refreshIntervalMinutes
         self.codexRefreshIntervalSeconds = codexRefreshIntervalSeconds
         self.monthlyTokenBudget = monthlyTokenBudget
@@ -172,6 +192,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.refreshIntervalMinutes = max(5, min(copy.refreshIntervalMinutes, 24 * 60))
         copy.codexRefreshIntervalSeconds = max(30, min(copy.codexRefreshIntervalSeconds, 24 * 60 * 60))
         copy.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(copy.codexMenuBarQuotaItems)
+        copy.visiblePanelModules = PanelModule.normalized(copy.visiblePanelModules)
         copy.projectIDs = copy.projectIDs.cleanedIdentifiers()
         copy.apiKeyIDs = copy.apiKeyIDs.cleanedIdentifiers()
         copy.modelIDs = copy.modelIDs.cleanedIdentifiers()
@@ -192,6 +213,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case codexMenuBarMode
         case codexMenuBarQuotaItems
         case codexMenuBarShowsQuotaLabels
+        case visiblePanelModules
         case refreshIntervalMinutes
         case codexRefreshIntervalSeconds
         case monthlyTokenBudget
@@ -214,6 +236,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             codexMenuBarMode: try container.decodeIfPresent(CodexMenuBarMode.self, forKey: .codexMenuBarMode) ?? .plan,
             codexMenuBarQuotaItems: try container.decodeIfPresent([CodexMenuBarQuotaItem].self, forKey: .codexMenuBarQuotaItems) ?? CodexMenuBarQuotaItem.defaults,
             codexMenuBarShowsQuotaLabels: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsQuotaLabels) ?? true,
+            visiblePanelModules: try container.decodeIfPresent([PanelModule].self, forKey: .visiblePanelModules) ?? PanelModule.defaults,
             refreshIntervalMinutes: try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 30,
             codexRefreshIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .codexRefreshIntervalSeconds) ?? 300,
             monthlyTokenBudget: try container.decodeIfPresent(Int.self, forKey: .monthlyTokenBudget),

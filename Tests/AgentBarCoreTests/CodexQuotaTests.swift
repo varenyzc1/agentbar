@@ -259,7 +259,16 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.basis), [.used, .used])
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.isEnabled), [true, true])
         XCTAssertEqual(settings.codexMenuBarShowsQuotaLabels, true)
+        XCTAssertEqual(settings.visiblePanelModules, PanelModule.defaults)
         XCTAssertEqual(settings.language, .english)
+    }
+
+    func testSettingsNormalizeVisiblePanelModules() {
+        let settings = AppSettings(
+            visiblePanelModules: [.heatmap, .summary, .summary, .codexQuota]
+        )
+
+        XCTAssertEqual(settings.visiblePanelModules, [.summary, .codexQuota, .heatmap])
     }
 
     func testSettingsNormalizeMenuBarItemsToSupportedWindows() {

@@ -13,6 +13,7 @@ struct AgentBarCopy {
     var display: String { text("Display", "显示") }
     var metric: String { text("Metric", "指标") }
     var labels: String { text("Labels", "标签") }
+    var panelModules: String { text("Modules", "模块") }
     var languageLabel: String { text("Language", "语言") }
     var login: String { text("Login", "登录项") }
     var tokenBudget: String { text("Tokens", "Tokens") }
@@ -28,6 +29,8 @@ struct AgentBarCopy {
     var open: String { text("Open", "打开") }
     var settings: String { text("Settings", "设置") }
     var quit: String { text("Quit", "退出") }
+    var collapseRange: String { text("Hide range", "收起时间范围") }
+    var expandRange: String { text("Show range", "选择时间范围") }
     var notRefreshed: String { text("Not refreshed", "尚未刷新") }
     var refreshingQuota: String { text("Refreshing quota", "正在刷新额度") }
     var unsupportedAPIKey: String { text("API key mode does not support subscription quota. Sign in with a ChatGPT subscription.", "API key 模式不支持订阅额度，请使用 ChatGPT 订阅登录。") }
@@ -42,10 +45,10 @@ struct AgentBarCopy {
     var all: String { text("All", "全部") }
     var topModel: String { text("Top Model", "主要模型") }
     var noLocalUsageYet: String { text("No local usage yet", "暂无本地使用记录") }
+    var noVisibleModules: String { text("No visible modules", "未显示模块") }
     var days365: String { text("365 Days", "365 天") }
     var less: String { text("Less", "少") }
     var more: String { text("More", "多") }
-    var sources: String { text("Sources", "来源") }
     var byline: String { text("By varenyzc", "作者 varenyzc") }
     var contributorByline: String { text("By ZengWenJian123", "协作 ZengWenJian123") }
     var openGitHubRepository: String { text("Open GitHub repository", "打开 GitHub 仓库") }
@@ -61,6 +64,9 @@ struct AgentBarCopy {
     var output: String { text("Output", "输出") }
     var cached: String { text("Cached", "缓存") }
     var topModels: String { text("Top Models", "模型用量明细") }
+    var model: String { text("Model", "模型") }
+    var agent: String { text("Agent", "Agent") }
+    var agentUsage: String { text("Agent Usage", "Agent 使用") }
     var trend30Days: String { text("30 Day Trend", "近 30 天趋势") }
     var top3: String { text("Top 3", "Top 3") }
     var top5: String { text("Top 5", "Top 5") }
@@ -104,6 +110,21 @@ struct AgentBarCopy {
             return "English"
         case .simplifiedChinese:
             return "中文"
+        }
+    }
+
+    func panelModuleTitle(_ module: PanelModule) -> String {
+        switch module {
+        case .summary:
+            return text("Range summary", "范围摘要")
+        case .details:
+            return text("Usage details", "用量明细")
+        case .trend:
+            return text("30 day trend", "30 天趋势")
+        case .codexQuota:
+            return text("Codex quota", "Codex 额度")
+        case .heatmap:
+            return text("365 day heatmap", "365 天热力图")
         }
     }
 

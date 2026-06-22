@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AgentBarModel
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var refreshIntervalSeconds = "300"
     @State private var monthlyTokenBudget = ""
@@ -15,6 +16,10 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 compactSection(copy.menuBar) {
                     menuBarControls
+                }
+
+                compactSection(copy.panelModules) {
+                    panelModuleControls
                 }
 
                 HStack(alignment: .top, spacing: 12) {
@@ -344,6 +349,47 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var panelModuleControls: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 142), spacing: 8, alignment: .leading)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(PanelModule.allCases) { module in
+                moduleVisibilityChip(for: module)
+            }
+        }
+    }
+
+    private func moduleVisibilityChip(for module: PanelModule) -> some View {
+        let binding = moduleVisibilityBinding(for: module)
+        return Button {
+            binding.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                AgentBarCheckbox(isOn: binding.wrappedValue)
+                Text(copy.panelModuleTitle(module))
+                    .font(.caption.weight(.medium))
+                    .agentBarPrimaryText()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .circular)
+                    .fill(AgentBarStyle.fieldBackground(colorScheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .circular)
+                    .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .circular))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -452,6 +498,22 @@ struct SettingsView: View {
                 updateQuotaItem(for: key) { item in
                     item.basis = basis
                 }
+            }
+        )
+    }
+
+    private func moduleVisibilityBinding(for module: PanelModule) -> Binding<Bool> {
+        Binding(
+            get: { model.settings.visiblePanelModules.contains(module) },
+            set: { isVisible in
+                var modules = model.settings.visiblePanelModules
+                if isVisible {
+                    modules.append(module)
+                } else {
+                    modules.removeAll { $0 == module }
+                }
+                model.settings.visiblePanelModules = PanelModule.normalized(modules)
+                model.persistSettings()
             }
         )
     }

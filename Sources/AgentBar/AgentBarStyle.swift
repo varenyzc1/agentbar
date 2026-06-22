@@ -261,7 +261,9 @@ struct AgentBarSegmentedPicker<Option: Identifiable & Hashable>: View {
                         .frame(height: 22)
                         .padding(.horizontal, 6)
                         .background(segmentBackground(for: option))
+                        .contentShape(RoundedRectangle(cornerRadius: 5, style: .circular))
                 }
+                .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
             }
         }

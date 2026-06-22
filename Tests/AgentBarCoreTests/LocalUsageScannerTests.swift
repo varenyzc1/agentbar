@@ -188,6 +188,52 @@ final class LocalUsageScannerTests: XCTestCase {
         XCTAssertEqual(summary.dailyModelUsageDays[0].reasoningOutputTokens, 1_000_000)
     }
 
+    func testSummaryIncludesDailySourceUsageForRangeFiltering() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let dayOne = fixedDate("2026-06-12T10:00:00Z")
+        let dayTwo = fixedDate("2026-06-13T10:00:00Z")
+        let entries = [
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: dayOne, inputTokens: 100, outputTokens: 50, dedupKey: "codex-1"),
+            TokenEntry(source: "claude-code", model: "claude-sonnet-4-5", project: "agentbar", timestamp: dayOne, inputTokens: 30, outputTokens: 20, dedupKey: "claude-1"),
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: dayTwo, inputTokens: 200, outputTokens: 100, cachedInputTokens: 40, dedupKey: "codex-2")
+        ]
+
+        _ = try database.ingest(entries: entries, strategy: .addDelta, syncedAt: dayTwo)
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.dailySourceUsageDays.map { "\($0.day):\($0.source):\($0.totalTokens)" }, [
+            "2026-06-12:claude-code:50",
+            "2026-06-12:codex:150",
+            "2026-06-13:codex:340"
+        ])
+    }
+
+    func testSummaryDailyUsageIncludesOlderHistoryForAllRange() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let oldDay = fixedDate("2025-05-01T10:00:00Z")
+        let recentDay = fixedDate("2026-06-13T10:00:00Z")
+        let entries = [
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: oldDay, inputTokens: 70, outputTokens: 30, dedupKey: "old-codex"),
+            TokenEntry(source: "claude-code", model: "claude-sonnet-4-5", project: "agentbar", timestamp: recentDay, inputTokens: 100, outputTokens: 50, dedupKey: "recent-claude")
+        ]
+
+        _ = try database.ingest(entries: entries, strategy: .addDelta, syncedAt: recentDay)
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.dailyUsageDays.first?.day, "2025-05-01")
+        XCTAssertEqual(summary.dailyUsageDays.map(\.totalTokens).reduce(0, +), 250)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.totalTokens).reduce(0, +), 250)
+        XCTAssertEqual(summary.dailySourceUsageDays.map(\.totalTokens).reduce(0, +), 250)
+    }
+
     func testSettingsStoreWritesSettingsJSON() throws {
         let home = temporaryDirectory()
         let settingsURL = home.appendingPathComponent("Application Support/AgentBar/settings.json")
