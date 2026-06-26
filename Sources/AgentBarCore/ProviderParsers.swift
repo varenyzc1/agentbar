@@ -135,8 +135,9 @@ public struct CodexSessionParser: ProviderParser {
     public func parseFile(at url: URL, fromOffset: Int64?) throws -> [TokenEntry] {
         let project = (try? Self.projectName(in: url)) ?? "unknown"
         let rows = try JSONLineReader.objects(at: url, fromOffset: fromOffset)
+        let metadataRows = fromOffset == nil ? rows : (try? JSONLineReader.objects(at: url, fromOffset: nil)) ?? rows
         let fallbackDate = ProviderJSON.fileModificationDate(url) ?? Date()
-        let fallbackModel = Self.modelName(in: rows) ?? "unknown"
+        let fallbackModel = Self.modelName(in: metadataRows) ?? "unknown"
 
         return rows.compactMap { row in
             guard ProviderJSON.string(row.object, "type") == "event_msg",

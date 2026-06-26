@@ -155,6 +155,36 @@ public final class UsageDatabase: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    public func prepareForScan(cacheVersion: String, sourceIDs: [String]) throws -> Bool {
+        try locked {
+            let uniqueSources = Array(Set(sourceIDs)).filter { !$0.isEmpty }.sorted()
+            let staleSources = try uniqueSources.filter { sourceID in
+                try metaValueUnlocked(key: Self.scanCacheVersionKey(for: sourceID)) != cacheVersion
+            }
+            guard !staleSources.isEmpty else { return false }
+
+            try executeUnlocked("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                for sourceID in staleSources {
+                    try deleteBucketsUnlocked(source: sourceID)
+                    try deleteScanFilesUnlocked(source: sourceID)
+                    try setMetaUnlocked(key: Self.scanCacheVersionKey(for: sourceID), value: cacheVersion)
+                }
+                try setMetaUnlocked(key: "scan_cache_version", value: cacheVersion)
+                try executeUnlocked("COMMIT;")
+                return true
+            } catch {
+                try? executeUnlocked("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    private static func scanCacheVersionKey(for sourceID: String) -> String {
+        "scan_cache_version:\(sourceID)"
+    }
+
     public func ingest(entries: [TokenEntry], strategy: BucketMergeStrategy = .addDelta, syncedAt: Date = Date()) throws -> Int {
         guard !entries.isEmpty else { return 0 }
 
@@ -302,8 +332,8 @@ public final class UsageDatabase: @unchecked Sendable {
             try executeUnlocked("PRAGMA synchronous = NORMAL;")
             try createSchemaUnlocked()
             try seedDefaultPricingUnlocked(force: false)
-            try setMetaUnlocked(key: "schema_version", value: "1")
-            try setMetaUnlocked(key: "scan_cache_version", value: "1")
+            try setMetaIfMissingUnlocked(key: "schema_version", value: "1")
+            try setMetaIfMissingUnlocked(key: "scan_cache_version", value: "1")
         }
     }
 
@@ -430,6 +460,45 @@ public final class UsageDatabase: @unchecked Sendable {
         ) { statement in
             try bindText(key, to: statement, at: 1)
             try bindText(value, to: statement, at: 2)
+        }
+    }
+
+    private func setMetaIfMissingUnlocked(key: String, value: String) throws {
+        try executePreparedUnlocked(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?);"
+        ) { statement in
+            try bindText(key, to: statement, at: 1)
+            try bindText(value, to: statement, at: 2)
+        }
+    }
+
+    private func metaValueUnlocked(key: String) throws -> String? {
+        var value: String?
+        try queryUnlocked(
+            "SELECT value FROM meta WHERE key = ?;",
+            bind: { statement in
+                try bindText(key, to: statement, at: 1)
+            },
+            row: { statement in
+                value = columnString(statement, 0)
+            }
+        )
+        return value
+    }
+
+    private func deleteBucketsUnlocked(source: String) throws {
+        try executePreparedUnlocked(
+            "DELETE FROM usage_buckets WHERE source = ?;"
+        ) { statement in
+            try bindText(source, to: statement, at: 1)
+        }
+    }
+
+    private func deleteScanFilesUnlocked(source: String) throws {
+        try executePreparedUnlocked(
+            "DELETE FROM scan_files WHERE source = ?;"
+        ) { statement in
+            try bindText(source, to: statement, at: 1)
         }
     }
 
@@ -690,10 +759,7 @@ public final class UsageDatabase: @unchecked Sendable {
 
     private func dailyModelUsageUnlocked(startDay: String?) throws -> [DailyModelUsage] {
         var rows: [DailyModelUsage] = []
-        let datePredicate = startDay.map { _ in "bucket_date_local >= ?" }
-        let predicates = ([datePredicate] + ["TRIM(LOWER(model)) != 'unknown'", "TRIM(model) != ''"])
-            .compactMap { $0 }
-            .joined(separator: " AND ")
+        let whereClause = startDay.map { _ in "WHERE bucket_date_local >= ?" } ?? ""
         try queryUnlocked(
             """
             SELECT bucket_date_local,
@@ -705,7 +771,7 @@ public final class UsageDatabase: @unchecked Sendable {
                    SUM(reasoning_output_tokens),
                    SUM(estimated_cost_usd)
             FROM usage_buckets
-            WHERE \(predicates)
+            \(whereClause)
             GROUP BY bucket_date_local, model
             ORDER BY bucket_date_local ASC, model ASC;
             """,
