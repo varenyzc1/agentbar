@@ -193,7 +193,6 @@ public struct URLSessionCodexQuotaTransport: CodexQuotaHTTPTransport {
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
-        configuration.connectionProxyDictionary = [:]
         return URLSession(configuration: configuration)
     }
 }

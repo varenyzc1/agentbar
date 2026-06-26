@@ -212,6 +212,12 @@ final class CodexQuotaTests: XCTestCase {
         }
     }
 
+    func testURLSessionTransportPreservesSystemProxyConfiguration() {
+        let session = URLSessionCodexQuotaTransport.makeSession()
+
+        XCTAssertNil(session.configuration.connectionProxyDictionary)
+    }
+
     func testParserClampsAndMarksStaleWindows() throws {
         let now = Date(timeIntervalSince1970: 1_000)
         let body = """
