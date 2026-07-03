@@ -37,6 +37,7 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "originator"), "Codex Desktop")
         XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "OAI-Product-Sku"), "CODEX")
         XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "ChatGPT-Account-Id"), "acct_from_jwt")
+        XCTAssertEqual(transport.requests[0].timeoutInterval, 20)
         XCTAssertEqual(snapshot.availableCount, 1)
         XCTAssertEqual(snapshot.availableCredits.first?.resetType, "codex_rate_limits")
         XCTAssertEqual(snapshot.availableCredits.first?.expiresAt, Date(timeIntervalSince1970: 1_784_188_304))

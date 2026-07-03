@@ -38,6 +38,7 @@ public enum CodexResetCreditsClientError: LocalizedError, Equatable {
 
 public struct CodexResetCreditsClient: Sendable {
     public static let bodyLimit = 64 * 1024
+    public static let requestTimeout: TimeInterval = 20
 
     private static let resetCreditsURL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!
 
@@ -81,7 +82,7 @@ public struct CodexResetCreditsClient: Sendable {
     private func request(credentials: CodexCredentials) -> URLRequest {
         var request = URLRequest(url: Self.resetCreditsURL)
         request.httpMethod = "GET"
-        request.timeoutInterval = 8
+        request.timeoutInterval = Self.requestTimeout
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("Codex Desktop", forHTTPHeaderField: "originator")
         request.setValue("CODEX", forHTTPHeaderField: "OAI-Product-Sku")
@@ -137,8 +138,8 @@ public struct URLSessionCodexResetCreditsTransport: CodexResetCreditsHTTPTranspo
 
     public static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 8
-        configuration.timeoutIntervalForResource = 8
+        configuration.timeoutIntervalForRequest = CodexResetCreditsClient.requestTimeout
+        configuration.timeoutIntervalForResource = CodexResetCreditsClient.requestTimeout
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
