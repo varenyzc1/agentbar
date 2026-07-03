@@ -82,8 +82,14 @@ public enum PanelModule: String, Codable, CaseIterable, Identifiable, Sendable {
     public static let defaults: [PanelModule] = allCases
 
     public static func normalized(_ modules: [PanelModule]) -> [PanelModule] {
-        let selected = Set(modules)
-        return allCases.filter { selected.contains($0) }
+        var seen = Set<PanelModule>()
+        return modules.filter { module in
+            guard allCases.contains(module), !seen.contains(module) else {
+                return false
+            }
+            seen.insert(module)
+            return true
+        }
     }
 }
 

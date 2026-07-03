@@ -19,6 +19,13 @@ enum CodexQuotaCardState: Equatable {
     case error(String)
 }
 
+enum CodexResetCreditsState: Equatable {
+    case idle
+    case loading
+    case ready(CodexResetCreditsSnapshot)
+    case error(String)
+}
+
 @MainActor
 final class AgentBarModel: ObservableObject {
     @Published var settings: AppSettings
@@ -31,10 +38,12 @@ final class AgentBarModel: ObservableObject {
     @Published var updateState: AppUpdateState = .idle
     @Published var installMethod: AppInstallMethod = .unknown
     @Published var codexQuotaRefreshFailure: String?
+    @Published var resetCreditsState: CodexResetCreditsState = .idle
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
     private let client: CodexQuotaClient
+    private let resetCreditsClient: CodexResetCreditsClient
     private let quotaCacheStore: CodexQuotaCacheStore
     private let now: () -> Date
     private let database: UsageDatabase?
@@ -54,6 +63,7 @@ final class AgentBarModel: ObservableObject {
         settingsStore: AppSettingsStore = AppSettingsStore(),
         authLoader: CodexAuthLoader = CodexAuthLoader(),
         client: CodexQuotaClient = CodexQuotaClient(),
+        resetCreditsClient: CodexResetCreditsClient = CodexResetCreditsClient(),
         quotaCacheStore: CodexQuotaCacheStore = CodexQuotaCacheStore(),
         database: UsageDatabase? = try? UsageDatabase(),
         now: @escaping () -> Date = Date.init
@@ -61,6 +71,7 @@ final class AgentBarModel: ObservableObject {
         self.settingsStore = settingsStore
         self.authLoader = authLoader
         self.client = client
+        self.resetCreditsClient = resetCreditsClient
         self.quotaCacheStore = quotaCacheStore
         self.now = now
         self.settings = settingsStore.load()
@@ -133,6 +144,7 @@ final class AgentBarModel: ObservableObject {
             currentDate: currentDate,
             honorsRefreshInterval: honorsCodexRefreshInterval
         )
+        await refreshResetCredits(updatesStatus: false)
         isRefreshing = false
     }
 
@@ -260,6 +272,52 @@ final class AgentBarModel: ObservableObject {
 
     func popoverOpened() {
         Task { await refresh(force: false) }
+    }
+
+    func refreshResetCredits() async {
+        await refreshResetCredits(updatesStatus: true)
+    }
+
+    private func refreshResetCredits(updatesStatus: Bool) async {
+        guard resetCreditsState != .loading else { return }
+        resetCreditsState = .loading
+
+        switch authLoader.load() {
+        case let .credentials(credentials):
+            do {
+                let snapshot = try await resetCreditsClient.fetch(credentials: credentials)
+                resetCreditsState = .ready(snapshot)
+                if updatesStatus {
+                    statusMessage = "Reset credits updated"
+                }
+            } catch {
+                let message = PrivacyScrubber.scrub(error.localizedDescription)
+                resetCreditsState = .error(message)
+                if updatesStatus {
+                    statusMessage = "Reset credits failed"
+                }
+            }
+        case .unsupportedAPIKey:
+            resetCreditsState = .error("API key 模式不支持重置卡查询")
+            if updatesStatus {
+                statusMessage = "Reset credits failed"
+            }
+        case .notLoggedIn:
+            resetCreditsState = .error("未登录,运行 codex login")
+            if updatesStatus {
+                statusMessage = "Reset credits failed"
+            }
+        case .notConfigured:
+            resetCreditsState = .error("Codex 未配置")
+            if updatesStatus {
+                statusMessage = "Reset credits failed"
+            }
+        case let .invalid(message):
+            resetCreditsState = .error(message)
+            if updatesStatus {
+                statusMessage = "Reset credits failed"
+            }
+        }
     }
 
     func resetPricing() {

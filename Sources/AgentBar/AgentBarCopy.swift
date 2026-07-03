@@ -14,6 +14,9 @@ struct AgentBarCopy {
     var metric: String { text("Metric", "指标") }
     var labels: String { text("Labels", "标签") }
     var panelModules: String { text("Modules", "模块") }
+    var moveUp: String { text("Move up", "上移") }
+    var moveDown: String { text("Move down", "下移") }
+    var dragToReorder: String { text("Drag to reorder", "拖动排序") }
     var languageLabel: String { text("Language", "语言") }
     var login: String { text("Login", "登录项") }
     var tokenBudget: String { text("Tokens", "Tokens") }
@@ -33,6 +36,17 @@ struct AgentBarCopy {
     var expandRange: String { text("Show range", "选择时间范围") }
     var notRefreshed: String { text("Not refreshed", "尚未刷新") }
     var refreshingQuota: String { text("Refreshing quota", "正在刷新额度") }
+    var resetCredits: String { text("Reset credits", "重置卡") }
+    var queryResetCredits: String { text("Refresh reset credits", "刷新重置卡") }
+    var queryingResetCredits: String { text("Querying reset credits", "正在查询重置卡") }
+    var hideResetCredits: String { text("Hide reset credits", "隐藏重置卡") }
+    var showResetCredits: String { text("Show reset credits", "显示重置卡") }
+    var resetCreditsHidden: String { text("Reset credits hidden", "重置卡已隐藏") }
+    var availableResetCredits: String { text("available", "可用") }
+    var earliestExpiration: String { text("Earliest", "最早到期") }
+    var allResetCredits: String { text("All reset credits", "全部重置卡") }
+    var noResetCredits: String { text("No reset credits returned", "没有返回重置卡") }
+    var expires: String { text("Expires", "到期") }
     var unsupportedAPIKey: String { text("API key mode does not support subscription quota. Sign in with a ChatGPT subscription.", "API key 模式不支持订阅额度，请使用 ChatGPT 订阅登录。") }
     var codexNotConfigured: String { text("Codex is not configured\ncodex login", "Codex 未配置\ncodex login") }
     var codexNotLoggedIn: String { text("Not signed in. Run codex login", "未登录，请运行 codex login") }
@@ -143,6 +157,19 @@ struct AgentBarCopy {
         }
     }
 
+    func resetCreditStatus(_ status: String) -> String {
+        switch status.lowercased() {
+        case "available":
+            return text("Available", "可用")
+        case "redeemed":
+            return text("Redeemed", "已使用")
+        case "expired":
+            return text("Expired", "已过期")
+        default:
+            return status
+        }
+    }
+
     func updated(at date: Date) -> String {
         text(
             "Updated \(date.formatted(date: .omitted, time: .shortened))",
@@ -238,6 +265,10 @@ struct AgentBarCopy {
             return "已更新"
         case "Unable to refresh Codex quota":
             return "无法刷新 Codex 额度"
+        case "Reset credits updated":
+            return "重置卡已更新"
+        case "Reset credits failed":
+            return "重置卡查询失败"
         case "Pricing reset":
             return "价格已重置"
         case "Pricing reset failed":

@@ -128,47 +128,51 @@ struct MenuBarPanelView: View {
             if modules.isEmpty {
                 noVisibleModulesCard
             } else {
-                if modules.contains(.summary) {
-                    UsageWindowSummaryView(window: usageWindow, language: model.settings.language)
-                }
-
-                if modules.contains(.details) {
-                    ModelUsageDetailsView(
-                        window: usageWindow,
-                        mode: $usageDetailsMode,
-                        topLimit: $topModelLimit,
-                        language: model.settings.language
-                    )
-                }
-
-                if modules.contains(.trend) {
-                    UsageThirtyDayBarChartView(days: recentThirtyDayUsage, language: model.settings.language)
-                        .zIndex(2)
-                }
-
-                if modules.contains(.codexQuota) {
-                    CodexQuotaCardView(
-                        state: model.quotaState,
-                        quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
-                        refreshFailureMessage: model.codexQuotaRefreshFailure,
-                        now: Date(),
-                        language: model.settings.language
-                    )
-                }
-
-                if modules.contains(.heatmap) {
-                    UsageHeatmapView(
-                        days: model.usageSummary.heatmapDays,
-                        language: model.settings.language,
-                        animationID: openingAnimationID
-                    )
+                ForEach(modules) { module in
+                    panelModuleView(module, usageWindow: usageWindow)
                 }
             }
         }
     }
 
-    private var visiblePanelModules: Set<PanelModule> {
-        Set(model.settings.sanitized.visiblePanelModules)
+    @ViewBuilder
+    private func panelModuleView(_ module: PanelModule, usageWindow: UsageWindowSnapshot) -> some View {
+        switch module {
+        case .summary:
+            UsageWindowSummaryView(window: usageWindow, language: model.settings.language)
+        case .details:
+            ModelUsageDetailsView(
+                window: usageWindow,
+                mode: $usageDetailsMode,
+                topLimit: $topModelLimit,
+                language: model.settings.language
+            )
+        case .trend:
+            UsageThirtyDayBarChartView(days: recentThirtyDayUsage, language: model.settings.language)
+                .zIndex(2)
+        case .codexQuota:
+            CodexQuotaCardView(
+                state: model.quotaState,
+                quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
+                refreshFailureMessage: model.codexQuotaRefreshFailure,
+                resetCreditsState: model.resetCreditsState,
+                now: Date(),
+                language: model.settings.language,
+                onQueryResetCredits: {
+                    Task { await model.refreshResetCredits() }
+                }
+            )
+        case .heatmap:
+            UsageHeatmapView(
+                days: model.usageSummary.heatmapDays,
+                language: model.settings.language,
+                animationID: openingAnimationID
+            )
+        }
+    }
+
+    private var visiblePanelModules: [PanelModule] {
+        model.settings.sanitized.visiblePanelModules
     }
 
     private var noVisibleModulesCard: some View {
@@ -341,11 +345,14 @@ struct CodexQuotaCardView: View {
     let state: CodexQuotaCardState
     let quotaItems: [CodexMenuBarQuotaItem]
     let refreshFailureMessage: String?
+    let resetCreditsState: CodexResetCreditsState
     let now: Date
     let language: AppLanguage
+    let onQueryResetCredits: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var redactsAccountEmail = false
+    @State private var hidesResetCredits = false
     private var copy: AgentBarCopy {
         AgentBarCopy(language: language)
     }
@@ -461,6 +468,7 @@ struct CodexQuotaCardView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            resetCreditsPanel
         }
         .agentBarCard(padding: 12)
     }
@@ -497,8 +505,181 @@ struct CodexQuotaCardView: View {
                 .font(.callout)
                 .foregroundStyle(severity == .critical ? AgentBarStyle.red : AgentBarStyle.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+
+            resetCreditsPanel
         }
         .agentBarCard(padding: 12)
+    }
+
+    private var resetCreditsPanel: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+
+            HStack(spacing: 8) {
+                Label(copy.resetCredits, systemImage: "arrow.counterclockwise.circle")
+                    .font(.caption.weight(.semibold))
+
+                Spacer()
+
+                Button {
+                    hidesResetCredits.toggle()
+                } label: {
+                    Image(systemName: hidesResetCredits ? "eye" : "eye.slash")
+                        .imageScale(.small)
+                }
+                .buttonStyle(AgentBarIconButtonStyle())
+                .help(hidesResetCredits ? copy.showResetCredits : copy.hideResetCredits)
+
+                Button {
+                    onQueryResetCredits()
+                } label: {
+                    Image(systemName: resetCreditsState == .loading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                        .imageScale(.small)
+                }
+                .buttonStyle(AgentBarIconButtonStyle())
+                .disabled(resetCreditsState == .loading)
+                .help(copy.queryResetCredits)
+            }
+
+            if hidesResetCredits {
+                Label(copy.resetCreditsHidden, systemImage: "lock")
+                    .font(.caption)
+                    .agentBarSecondaryText()
+            } else {
+                resetCreditsContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resetCreditsContent: some View {
+        switch resetCreditsState {
+        case .idle:
+            EmptyView()
+        case .loading:
+            Label(copy.queryingResetCredits, systemImage: "clock")
+                .font(.caption)
+                .agentBarSecondaryText()
+        case let .ready(snapshot):
+            VStack(alignment: .leading, spacing: 8) {
+                resetCreditsSummary(snapshot)
+
+                if snapshot.allCredits.isEmpty {
+                    Label(copy.noResetCredits, systemImage: "tray")
+                        .font(.caption)
+                        .agentBarSecondaryText()
+                } else {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(copy.allResetCredits)
+                            .font(.caption2.weight(.semibold))
+                            .agentBarSecondaryText()
+
+                        ForEach(snapshot.allCredits) { credit in
+                            resetCreditRow(credit)
+                        }
+                    }
+                }
+            }
+        case let .error(message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(AgentBarStyle.red)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func resetCreditsSummary(_ snapshot: CodexResetCreditsSnapshot) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(snapshot.availableCount)")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                Text(copy.availableResetCredits)
+                    .font(.caption2)
+                    .agentBarSecondaryText()
+            }
+            .frame(width: 46, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar.badge.clock")
+                        .imageScale(.small)
+                    Text(copy.earliestExpiration)
+                }
+                .font(.caption2.weight(.semibold))
+                .agentBarSecondaryText()
+
+                Text(snapshot.earliestExpiration.map(resetCreditDateText) ?? copy.unavailable)
+                    .font(.caption.monospacedDigit().weight(.medium))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))
+                .font(.caption2.monospacedDigit())
+                .agentBarSecondaryText()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .circular)
+                .fill(AgentBarStyle.fieldBackground(colorScheme))
+        )
+    }
+
+    private func resetCreditRow(_ credit: CodexResetCredit) -> some View {
+        HStack(alignment: .center, spacing: 7) {
+            Circle()
+                .fill(resetCreditColor(credit.status))
+                .frame(width: 6, height: 6)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(copy.resetCreditStatus(credit.status))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(resetCreditColor(credit.status))
+                    Text(credit.resetType)
+                        .font(.caption2)
+                        .agentBarSecondaryText()
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 4) {
+                    Text(copy.expires)
+                    Text(credit.expiresAt.map(resetCreditDateText) ?? copy.unavailable)
+                        .monospacedDigit()
+                }
+                .font(.caption2)
+                .agentBarSecondaryText()
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .circular)
+                .fill(AgentBarStyle.raisedBackground(colorScheme))
+        )
+    }
+
+    private func resetCreditDateText(_ date: Date) -> String {
+        date.formatted(date: .numeric, time: .shortened)
+    }
+
+    private func resetCreditColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "available":
+            return AgentBarStyle.green
+        case "redeemed":
+            return AgentBarStyle.secondaryText(colorScheme)
+        case "expired":
+            return AgentBarStyle.red
+        default:
+            return AgentBarStyle.yellow
+        }
     }
 
     private func statusDot(_ severity: CodexQuotaSeverity) -> some View {

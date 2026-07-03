@@ -274,7 +274,7 @@ final class CodexQuotaTests: XCTestCase {
             visiblePanelModules: [.heatmap, .summary, .summary, .codexQuota]
         )
 
-        XCTAssertEqual(settings.visiblePanelModules, [.summary, .codexQuota, .heatmap])
+        XCTAssertEqual(settings.visiblePanelModules, [.heatmap, .summary, .codexQuota])
     }
 
     func testSettingsNormalizeMenuBarItemsToSupportedWindows() {
