@@ -134,6 +134,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var codexMenuBarMode: CodexMenuBarMode
     public var codexMenuBarQuotaItems: [CodexMenuBarQuotaItem]
     public var codexMenuBarShowsQuotaLabels: Bool
+    public var codexMenuBarShowsLocalUsage: Bool
     public var visiblePanelModules: [PanelModule]
     public var refreshIntervalMinutes: Int
     public var codexRefreshIntervalSeconds: Int
@@ -154,6 +155,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         codexMenuBarMode: CodexMenuBarMode = .plan,
         codexMenuBarQuotaItems: [CodexMenuBarQuotaItem] = CodexMenuBarQuotaItem.defaults,
         codexMenuBarShowsQuotaLabels: Bool = true,
+        codexMenuBarShowsLocalUsage: Bool = false,
         visiblePanelModules: [PanelModule] = PanelModule.defaults,
         refreshIntervalMinutes: Int = 30,
         codexRefreshIntervalSeconds: Int = 300,
@@ -173,6 +175,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.codexMenuBarMode = codexMenuBarMode
         self.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(codexMenuBarQuotaItems)
         self.codexMenuBarShowsQuotaLabels = codexMenuBarShowsQuotaLabels
+        self.codexMenuBarShowsLocalUsage = codexMenuBarShowsLocalUsage
         self.visiblePanelModules = PanelModule.normalized(visiblePanelModules)
         self.refreshIntervalMinutes = refreshIntervalMinutes
         self.codexRefreshIntervalSeconds = codexRefreshIntervalSeconds
@@ -219,6 +222,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case codexMenuBarMode
         case codexMenuBarQuotaItems
         case codexMenuBarShowsQuotaLabels
+        case codexMenuBarShowsLocalUsage
         case visiblePanelModules
         case refreshIntervalMinutes
         case codexRefreshIntervalSeconds
@@ -242,6 +246,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             codexMenuBarMode: try container.decodeIfPresent(CodexMenuBarMode.self, forKey: .codexMenuBarMode) ?? .plan,
             codexMenuBarQuotaItems: try container.decodeIfPresent([CodexMenuBarQuotaItem].self, forKey: .codexMenuBarQuotaItems) ?? CodexMenuBarQuotaItem.defaults,
             codexMenuBarShowsQuotaLabels: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsQuotaLabels) ?? true,
+            codexMenuBarShowsLocalUsage: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsLocalUsage) ?? false,
             visiblePanelModules: try container.decodeIfPresent([PanelModule].self, forKey: .visiblePanelModules) ?? PanelModule.defaults,
             refreshIntervalMinutes: try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 30,
             codexRefreshIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .codexRefreshIntervalSeconds) ?? 300,

@@ -288,6 +288,16 @@ struct SettingsView: View {
         )
     }
 
+    private var showLocalUsageBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.codexMenuBarShowsLocalUsage },
+            set: { showsLocalUsage in
+                model.settings.codexMenuBarShowsLocalUsage = showsLocalUsage
+                model.persistSettings()
+            }
+        )
+    }
+
     private var menuBarControls: some View {
         VStack(alignment: .leading, spacing: 9) {
             settingRow(copy.display, labelWidth: 82) {
@@ -341,6 +351,24 @@ struct SettingsView: View {
                         .frame(width: 154, alignment: .leading)
                         .disabled(!quotaItem(for: key).isEnabled)
                     }
+                }
+
+                settingRow(copy.usage, labelWidth: 82) {
+                    Button {
+                        showLocalUsageBinding.wrappedValue.toggle()
+                    } label: {
+                        AgentBarCheckbox(isOn: showLocalUsageBinding.wrappedValue)
+                    }
+                    .fixedSize()
+                    .buttonStyle(.plain)
+
+                    AgentBarSegmentedPicker(
+                        options: MenuBarMetric.allCases,
+                        selection: menuBarMetricBinding,
+                        title: copy.metricTitle
+                    )
+                    .frame(width: 260, alignment: .leading)
+                    .disabled(!showLocalUsageBinding.wrappedValue)
                 }
 
                 settingRow(copy.languageLabel, labelWidth: 82) {

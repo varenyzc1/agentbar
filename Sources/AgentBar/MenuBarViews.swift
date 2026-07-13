@@ -156,6 +156,7 @@ struct MenuBarPanelView: View {
                 quotaItems: model.settings.sanitized.codexMenuBarQuotaItems,
                 refreshFailureMessage: model.codexQuotaRefreshFailure,
                 resetCreditsState: model.resetCreditsState,
+                resetCreditsRefreshFailure: model.resetCreditsRefreshFailure,
                 now: Date(),
                 language: model.settings.language,
                 onQueryResetCredits: {
@@ -346,6 +347,7 @@ struct CodexQuotaCardView: View {
     let quotaItems: [CodexMenuBarQuotaItem]
     let refreshFailureMessage: String?
     let resetCreditsState: CodexResetCreditsState
+    let resetCreditsRefreshFailure: String?
     let now: Date
     let language: AppLanguage
     let onQueryResetCredits: () -> Void
@@ -422,7 +424,7 @@ struct CodexQuotaCardView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
+                ForEach(CodexMenuBarQuotaItem.supportedKeys.filter { snapshot.window(for: $0) != nil }) { key in
                     MeterRowView(
                         window: snapshot.window(for: key),
                         key: key,
@@ -563,6 +565,14 @@ struct CodexQuotaCardView: View {
         case let .ready(snapshot):
             VStack(alignment: .leading, spacing: 8) {
                 resetCreditsSummary(snapshot)
+
+                if let resetCreditsRefreshFailure {
+                    Label(resetCreditsRefreshFailure, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(AgentBarStyle.red)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if snapshot.allCredits.isEmpty {
                     Label(copy.noResetCredits, systemImage: "tray")

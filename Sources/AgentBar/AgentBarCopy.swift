@@ -55,6 +55,7 @@ struct AgentBarCopy {
     var unavailable: String { text("unavailable", "不可用") }
     var stale: String { text("stale", "已过期") }
     var today: String { text("Today", "今日") }
+    var usage: String { text("Usage", "用量") }
     var sevenDaysShort: String { text("7D", "7 天") }
     var all: String { text("All", "全部") }
     var topModel: String { text("Top Model", "主要模型") }

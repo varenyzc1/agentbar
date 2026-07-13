@@ -103,6 +103,29 @@ public struct CodexQuotaWindow: Codable, Equatable, Identifiable, Sendable {
             stale: now > resetsAt.addingTimeInterval(60)
         )
     }
+
+    fileprivate func normalizingRateLimitKey() -> CodexQuotaWindow {
+        guard key != .codeReview else { return self }
+
+        let normalizedKey: CodexQuotaKey
+        switch limitWindowSeconds {
+        case 18_000:
+            normalizedKey = .fiveHour
+        case 604_800:
+            normalizedKey = .sevenDay
+        default:
+            normalizedKey = key
+        }
+        guard normalizedKey != key else { return self }
+        return CodexQuotaWindow(
+            key: normalizedKey,
+            usedPercent: usedPercent,
+            remainingPercent: remainingPercent,
+            resetsAt: resetsAt,
+            limitWindowSeconds: limitWindowSeconds,
+            stale: stale
+        )
+    }
 }
 
 public struct CodexQuotaSnapshot: Codable, Equatable, Sendable {
@@ -120,10 +143,33 @@ public struct CodexQuotaSnapshot: Codable, Equatable, Sendable {
         source: String
     ) {
         self.planType = planType
-        self.windows = windows.sorted { $0.key.rawValue < $1.key.rawValue }
+        var windowsByKey: [CodexQuotaKey: CodexQuotaWindow] = [:]
+        for window in windows.map({ $0.normalizingRateLimitKey() }) {
+            windowsByKey[window.key] = window
+        }
+        self.windows = windowsByKey.values.sorted { $0.key.rawValue < $1.key.rawValue }
         self.accountDisplayName = accountDisplayName
         self.fetchedAt = fetchedAt
         self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case planType
+        case windows
+        case accountDisplayName
+        case fetchedAt
+        case source
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            planType: try container.decode(String.self, forKey: .planType),
+            windows: try container.decode([CodexQuotaWindow].self, forKey: .windows),
+            accountDisplayName: try container.decodeIfPresent(String.self, forKey: .accountDisplayName),
+            fetchedAt: try container.decode(Date.self, forKey: .fetchedAt),
+            source: try container.decode(String.self, forKey: .source)
+        )
     }
 
     public var displayPlan: String {
@@ -197,19 +243,21 @@ public enum CodexQuotaParser {
     ) throws -> CodexQuotaSnapshot {
         do {
             let response = try JSONDecoder().decode(CodexUsageResponse.self, from: data)
-            var windows: [CodexQuotaWindow] = []
+            var windowsByKey: [CodexQuotaKey: CodexQuotaWindow] = [:]
             if let primary = response.rateLimit?.primaryWindow {
-                windows.append(primary.window(key: .fiveHour, now: now))
+                let key = primary.quotaKey(fallback: .fiveHour)
+                windowsByKey[key] = primary.window(key: key, now: now)
             }
             if let secondary = response.rateLimit?.secondaryWindow {
-                windows.append(secondary.window(key: .sevenDay, now: now))
+                let key = secondary.quotaKey(fallback: .sevenDay)
+                windowsByKey[key] = secondary.window(key: key, now: now)
             }
             if let review = response.codeReviewRateLimit?.primaryWindow {
-                windows.append(review.window(key: .codeReview, now: now))
+                windowsByKey[.codeReview] = review.window(key: .codeReview, now: now)
             }
             return CodexQuotaSnapshot(
                 planType: response.planType ?? "",
-                windows: windows,
+                windows: Array(windowsByKey.values),
                 accountDisplayName: accountDisplayName,
                 fetchedAt: now,
                 source: source
@@ -259,6 +307,17 @@ private struct CodexRawWindow: Decodable {
         case usedPercent = "used_percent"
         case resetAt = "reset_at"
         case limitWindowSeconds = "limit_window_seconds"
+    }
+
+    func quotaKey(fallback: CodexQuotaKey) -> CodexQuotaKey {
+        switch limitWindowSeconds {
+        case 18_000:
+            return .fiveHour
+        case 604_800:
+            return .sevenDay
+        default:
+            return fallback
+        }
     }
 
     func window(key: CodexQuotaKey, now: Date) -> CodexQuotaWindow {

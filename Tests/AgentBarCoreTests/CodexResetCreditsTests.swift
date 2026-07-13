@@ -104,6 +104,27 @@ final class CodexResetCreditsTests: XCTestCase {
         }
     }
 
+    func testCacheStoreRoundTripsSnapshot() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("reset-credits-cache.json")
+        let now = Date(timeIntervalSince1970: 1_783_801_904)
+        let snapshot = CodexResetCreditsSnapshot(
+            availableCount: 1,
+            availableCredits: [],
+            allCredits: [],
+            fetchedAt: now,
+            source: "test"
+        )
+        let record = CodexResetCreditsCacheRecord(snapshot: snapshot, cachedAt: now)
+        let store = CodexResetCreditsCacheStore(fileURL: fileURL)
+
+        try store.save(record)
+
+        XCTAssertEqual(try store.load(), record)
+    }
+
     private func jwt(payload: [String: Any]) throws -> String {
         let header = try JSONSerialization.data(withJSONObject: ["alg": "none"])
         let payload = try JSONSerialization.data(withJSONObject: payload)

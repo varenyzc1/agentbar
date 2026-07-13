@@ -39,12 +39,14 @@ final class AgentBarModel: ObservableObject {
     @Published var installMethod: AppInstallMethod = .unknown
     @Published var codexQuotaRefreshFailure: String?
     @Published var resetCreditsState: CodexResetCreditsState = .idle
+    @Published var resetCreditsRefreshFailure: String?
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
     private let client: CodexQuotaClient
     private let resetCreditsClient: CodexResetCreditsClient
     private let quotaCacheStore: CodexQuotaCacheStore
+    private let resetCreditsCacheStore: CodexResetCreditsCacheStore
     private let now: () -> Date
     private let database: UsageDatabase?
     private let scanner: UsageScanner?
@@ -54,6 +56,7 @@ final class AgentBarModel: ObservableObject {
     private var isScanningLocalUsage = false
     private var lastSuccessfulSnapshot: CodexQuotaSnapshot?
     private var lastNetworkAttempt: Date?
+    private var lastSuccessfulResetCreditsSnapshot: CodexResetCreditsSnapshot?
 
     private let startupLocalUsageScanDelay: UInt64 = 1_500_000_000
     private let freshQuotaTTL: TimeInterval = 60
@@ -65,6 +68,7 @@ final class AgentBarModel: ObservableObject {
         client: CodexQuotaClient = CodexQuotaClient(),
         resetCreditsClient: CodexResetCreditsClient = CodexResetCreditsClient(),
         quotaCacheStore: CodexQuotaCacheStore = CodexQuotaCacheStore(),
+        resetCreditsCacheStore: CodexResetCreditsCacheStore = CodexResetCreditsCacheStore(),
         database: UsageDatabase? = try? UsageDatabase(),
         now: @escaping () -> Date = Date.init
     ) {
@@ -73,6 +77,7 @@ final class AgentBarModel: ObservableObject {
         self.client = client
         self.resetCreditsClient = resetCreditsClient
         self.quotaCacheStore = quotaCacheStore
+        self.resetCreditsCacheStore = resetCreditsCacheStore
         self.now = now
         self.settings = settingsStore.load()
         self.database = database
@@ -91,6 +96,7 @@ final class AgentBarModel: ObservableObject {
         }
 
         loadCachedCodexQuota()
+        loadCachedResetCredits()
         scheduleRefresh()
         scheduleStartupLocalUsageScan()
         Task { await refreshInstallMethod() }
@@ -281,42 +287,62 @@ final class AgentBarModel: ObservableObject {
     private func refreshResetCredits(updatesStatus: Bool) async {
         guard resetCreditsState != .loading else { return }
         resetCreditsState = .loading
+        resetCreditsRefreshFailure = nil
 
         switch authLoader.load() {
         case let .credentials(credentials):
             do {
                 let snapshot = try await resetCreditsClient.fetch(credentials: credentials)
+                lastSuccessfulResetCreditsSnapshot = snapshot
                 resetCreditsState = .ready(snapshot)
+                try? resetCreditsCacheStore.save(CodexResetCreditsCacheRecord(snapshot: snapshot))
                 if updatesStatus {
                     statusMessage = "Reset credits updated"
                 }
             } catch {
                 let message = PrivacyScrubber.scrub(error.localizedDescription)
-                resetCreditsState = .error(message)
+                showCachedResetCreditsOrError(message)
                 if updatesStatus {
                     statusMessage = "Reset credits failed"
                 }
             }
         case .unsupportedAPIKey:
-            resetCreditsState = .error("API key 模式不支持重置卡查询")
+            showCachedResetCreditsOrError("API key 模式不支持重置卡查询")
             if updatesStatus {
                 statusMessage = "Reset credits failed"
             }
         case .notLoggedIn:
-            resetCreditsState = .error("未登录,运行 codex login")
+            showCachedResetCreditsOrError("未登录,运行 codex login")
             if updatesStatus {
                 statusMessage = "Reset credits failed"
             }
         case .notConfigured:
-            resetCreditsState = .error("Codex 未配置")
+            showCachedResetCreditsOrError("Codex 未配置")
             if updatesStatus {
                 statusMessage = "Reset credits failed"
             }
         case let .invalid(message):
-            resetCreditsState = .error(message)
+            showCachedResetCreditsOrError(message)
             if updatesStatus {
                 statusMessage = "Reset credits failed"
             }
+        }
+    }
+
+    private func loadCachedResetCredits() {
+        guard let record = try? resetCreditsCacheStore.load() else { return }
+        lastSuccessfulResetCreditsSnapshot = record.snapshot
+        resetCreditsState = .ready(record.snapshot)
+    }
+
+    private func showCachedResetCreditsOrError(_ message: String) {
+        if let snapshot = lastSuccessfulResetCreditsSnapshot
+            ?? (try? resetCreditsCacheStore.load())?.snapshot {
+            lastSuccessfulResetCreditsSnapshot = snapshot
+            resetCreditsState = .ready(snapshot)
+            resetCreditsRefreshFailure = message
+        } else {
+            resetCreditsState = .error(message)
         }
     }
 
@@ -412,13 +438,19 @@ final class AgentBarModel: ObservableObject {
             let count = snapshot.warningCount
             return count > 0 ? limitedTitle("\(count)⚠") : ""
         case .plan:
-            guard case let .ready(snapshot, _) = quotaState else {
+            var parts: [String] = []
+            if case let .ready(snapshot, _) = quotaState {
+                parts = settings.codexMenuBarQuotaItems
+                    .filter(\.isEnabled)
+                    .compactMap { menuBarPart(for: $0, snapshot: snapshot) }
+            }
+            if settings.codexMenuBarShowsLocalUsage {
+                parts.append(labeledLocalUsageMenuBarTitle)
+            }
+            guard !parts.isEmpty else {
+                if case .ready = quotaState { return localUsageMenuBarTitle }
                 return "--"
             }
-            let parts = settings.codexMenuBarQuotaItems
-                .filter(\.isEnabled)
-                .map { menuBarPart(for: $0, snapshot: snapshot) }
-            guard !parts.isEmpty else { return localUsageMenuBarTitle }
             return limitedTitle(parts.joined(separator: " · "))
         }
     }
@@ -476,6 +508,16 @@ final class AgentBarModel: ObservableObject {
                 return AgentBarCopy(language: settings.language).noBudget
             }
             return limitedTitle(AgentBarFormatters.percent(remainingPercent))
+        }
+    }
+
+    private var labeledLocalUsageMenuBarTitle: String {
+        let copy = AgentBarCopy(language: settings.language)
+        switch settings.menuBarMetric {
+        case .usedTokens, .usedCost:
+            return localUsageMenuBarTitle
+        case .remainingPercent:
+            return "\(copy.metricTitle(.remainingPercent)) \(localUsageMenuBarTitle)"
         }
     }
 
@@ -542,8 +584,6 @@ final class AgentBarModel: ObservableObject {
                     let used = AgentBarFormatters.percent(window.usedPercent)
                     let reset = AgentBarFormatters.relativeReset(from: currentDate, to: window.resetsAt, language: settings.language)
                     lines.append("\(key.label):  \(used) \(copy.used) · \(reset)")
-                } else {
-                    lines.append("\(key.label):  -- \(copy.used) · \(copy.unavailable)")
                 }
             }
             if isStale {
@@ -569,9 +609,9 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
-    private func menuBarPart(for item: CodexMenuBarQuotaItem, snapshot: CodexQuotaSnapshot) -> String {
+    private func menuBarPart(for item: CodexMenuBarQuotaItem, snapshot: CodexQuotaSnapshot) -> String? {
         guard let window = snapshot.window(for: item.key) else {
-            return "\(item.key.label) --"
+            return nil
         }
 
         let percent: String
