@@ -1931,6 +1931,7 @@ private struct UsageBarChartView: View {
                                 .offset(x: hoverCardX(for: hoveredDay, chartWidth: proxy.size.width), y: 2)
                             }
                         }
+                        .zIndex(hoveredDay == nil ? 0 : 10)
 
                         if granularity == .month {
                             monthAxisLabels
