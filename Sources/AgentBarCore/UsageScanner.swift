@@ -15,7 +15,7 @@ public struct UsageScanResult: Equatable, Sendable {
 }
 
 public final class UsageScanner: @unchecked Sendable {
-    private static let scanCacheVersion = "3"
+    private static let scanCacheVersion = "4"
 
     private let database: UsageDatabase
     private let parsers: [ProviderParser]
@@ -32,7 +32,8 @@ public final class UsageScanner: @unchecked Sendable {
         self.parsers = parsers ?? [
             ClaudeCodeParser(),
             CodexSessionParser(),
-            GeminiCLIParser()
+            GeminiCLIParser(),
+            GrokBuildParser()
         ]
         self.fileManager = fileManager
         self.logger = logger ?? UsageScannerLogger.defaultLogger()

@@ -74,7 +74,9 @@ public enum PanelModule: String, Codable, CaseIterable, Identifiable, Sendable {
     case summary
     case details
     case trend
+    case yearlyTrend
     case codexQuota
+    case grokQuota
     case heatmap
 
     public var id: String { rawValue }
@@ -135,7 +137,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var codexMenuBarQuotaItems: [CodexMenuBarQuotaItem]
     public var codexMenuBarShowsQuotaLabels: Bool
     public var codexMenuBarShowsLocalUsage: Bool
+    public var grokQuotaPercentBasis: CodexQuotaPercentBasis
+    public var grokMenuBarShowsQuota: Bool
     public var visiblePanelModules: [PanelModule]
+    public var panelModuleLayoutVersion: Int
     public var refreshIntervalMinutes: Int
     public var codexRefreshIntervalSeconds: Int
     public var monthlyTokenBudget: Int?
@@ -156,7 +161,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         codexMenuBarQuotaItems: [CodexMenuBarQuotaItem] = CodexMenuBarQuotaItem.defaults,
         codexMenuBarShowsQuotaLabels: Bool = true,
         codexMenuBarShowsLocalUsage: Bool = false,
+        grokQuotaPercentBasis: CodexQuotaPercentBasis = .used,
+        grokMenuBarShowsQuota: Bool = false,
         visiblePanelModules: [PanelModule] = PanelModule.defaults,
+        panelModuleLayoutVersion: Int = 1,
         refreshIntervalMinutes: Int = 30,
         codexRefreshIntervalSeconds: Int = 300,
         monthlyTokenBudget: Int? = nil,
@@ -176,7 +184,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(codexMenuBarQuotaItems)
         self.codexMenuBarShowsQuotaLabels = codexMenuBarShowsQuotaLabels
         self.codexMenuBarShowsLocalUsage = codexMenuBarShowsLocalUsage
+        self.grokQuotaPercentBasis = grokQuotaPercentBasis
+        self.grokMenuBarShowsQuota = grokMenuBarShowsQuota
         self.visiblePanelModules = PanelModule.normalized(visiblePanelModules)
+        self.panelModuleLayoutVersion = panelModuleLayoutVersion
         self.refreshIntervalMinutes = refreshIntervalMinutes
         self.codexRefreshIntervalSeconds = codexRefreshIntervalSeconds
         self.monthlyTokenBudget = monthlyTokenBudget
@@ -202,6 +213,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.codexRefreshIntervalSeconds = max(30, min(copy.codexRefreshIntervalSeconds, 24 * 60 * 60))
         copy.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(copy.codexMenuBarQuotaItems)
         copy.visiblePanelModules = PanelModule.normalized(copy.visiblePanelModules)
+        copy.panelModuleLayoutVersion = max(1, copy.panelModuleLayoutVersion)
         copy.projectIDs = copy.projectIDs.cleanedIdentifiers()
         copy.apiKeyIDs = copy.apiKeyIDs.cleanedIdentifiers()
         copy.modelIDs = copy.modelIDs.cleanedIdentifiers()
@@ -223,7 +235,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case codexMenuBarQuotaItems
         case codexMenuBarShowsQuotaLabels
         case codexMenuBarShowsLocalUsage
+        case grokQuotaPercentBasis
+        case grokMenuBarShowsQuota
         case visiblePanelModules
+        case panelModuleLayoutVersion
         case refreshIntervalMinutes
         case codexRefreshIntervalSeconds
         case monthlyTokenBudget
@@ -241,13 +256,24 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let storedLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .panelModuleLayoutVersion) ?? 0
+        var visiblePanelModules = try container.decodeIfPresent([PanelModule].self, forKey: .visiblePanelModules)
+            ?? PanelModule.defaults
+        if storedLayoutVersion < 1, !visiblePanelModules.contains(.yearlyTrend) {
+            let insertionIndex = visiblePanelModules.firstIndex(of: .trend).map { $0 + 1 }
+                ?? visiblePanelModules.endIndex
+            visiblePanelModules.insert(.yearlyTrend, at: insertionIndex)
+        }
         self.init(
             menuBarMetric: try container.decodeIfPresent(MenuBarMetric.self, forKey: .menuBarMetric) ?? .usedTokens,
             codexMenuBarMode: try container.decodeIfPresent(CodexMenuBarMode.self, forKey: .codexMenuBarMode) ?? .plan,
             codexMenuBarQuotaItems: try container.decodeIfPresent([CodexMenuBarQuotaItem].self, forKey: .codexMenuBarQuotaItems) ?? CodexMenuBarQuotaItem.defaults,
             codexMenuBarShowsQuotaLabels: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsQuotaLabels) ?? true,
             codexMenuBarShowsLocalUsage: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsLocalUsage) ?? false,
-            visiblePanelModules: try container.decodeIfPresent([PanelModule].self, forKey: .visiblePanelModules) ?? PanelModule.defaults,
+            grokQuotaPercentBasis: try container.decodeIfPresent(CodexQuotaPercentBasis.self, forKey: .grokQuotaPercentBasis) ?? .used,
+            grokMenuBarShowsQuota: try container.decodeIfPresent(Bool.self, forKey: .grokMenuBarShowsQuota) ?? false,
+            visiblePanelModules: visiblePanelModules,
+            panelModuleLayoutVersion: max(1, storedLayoutVersion),
             refreshIntervalMinutes: try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 30,
             codexRefreshIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .codexRefreshIntervalSeconds) ?? 300,
             monthlyTokenBudget: try container.decodeIfPresent(Int.self, forKey: .monthlyTokenBudget),

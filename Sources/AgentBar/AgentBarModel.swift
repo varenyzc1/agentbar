@@ -26,6 +26,15 @@ enum CodexResetCreditsState: Equatable {
     case error(String)
 }
 
+enum GrokQuotaCardState: Equatable {
+    case loading
+    case ready(GrokQuotaSnapshot, isStale: Bool)
+    case unsupportedAPIKey
+    case notConfigured
+    case notLoggedIn
+    case error(String)
+}
+
 @MainActor
 final class AgentBarModel: ObservableObject {
     @Published var settings: AppSettings
@@ -40,6 +49,8 @@ final class AgentBarModel: ObservableObject {
     @Published var codexQuotaRefreshFailure: String?
     @Published var resetCreditsState: CodexResetCreditsState = .idle
     @Published var resetCreditsRefreshFailure: String?
+    @Published var grokQuotaState: GrokQuotaCardState = .loading
+    @Published var grokQuotaRefreshFailure: String?
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
@@ -47,6 +58,9 @@ final class AgentBarModel: ObservableObject {
     private let resetCreditsClient: CodexResetCreditsClient
     private let quotaCacheStore: CodexQuotaCacheStore
     private let resetCreditsCacheStore: CodexResetCreditsCacheStore
+    private let grokAuthLoader: GrokAuthLoader
+    private let grokQuotaClient: GrokQuotaClient
+    private let grokQuotaCacheStore: GrokQuotaCacheStore
     private let now: () -> Date
     private let database: UsageDatabase?
     private let scanner: UsageScanner?
@@ -57,6 +71,8 @@ final class AgentBarModel: ObservableObject {
     private var lastSuccessfulSnapshot: CodexQuotaSnapshot?
     private var lastNetworkAttempt: Date?
     private var lastSuccessfulResetCreditsSnapshot: CodexResetCreditsSnapshot?
+    private var lastSuccessfulGrokSnapshot: GrokQuotaSnapshot?
+    private var lastGrokNetworkAttempt: Date?
 
     private let startupLocalUsageScanDelay: UInt64 = 1_500_000_000
     private let freshQuotaTTL: TimeInterval = 60
@@ -69,6 +85,9 @@ final class AgentBarModel: ObservableObject {
         resetCreditsClient: CodexResetCreditsClient = CodexResetCreditsClient(),
         quotaCacheStore: CodexQuotaCacheStore = CodexQuotaCacheStore(),
         resetCreditsCacheStore: CodexResetCreditsCacheStore = CodexResetCreditsCacheStore(),
+        grokAuthLoader: GrokAuthLoader = GrokAuthLoader(),
+        grokQuotaClient: GrokQuotaClient = GrokQuotaClient(),
+        grokQuotaCacheStore: GrokQuotaCacheStore = GrokQuotaCacheStore(),
         database: UsageDatabase? = try? UsageDatabase(),
         now: @escaping () -> Date = Date.init
     ) {
@@ -78,6 +97,9 @@ final class AgentBarModel: ObservableObject {
         self.resetCreditsClient = resetCreditsClient
         self.quotaCacheStore = quotaCacheStore
         self.resetCreditsCacheStore = resetCreditsCacheStore
+        self.grokAuthLoader = grokAuthLoader
+        self.grokQuotaClient = grokQuotaClient
+        self.grokQuotaCacheStore = grokQuotaCacheStore
         self.now = now
         self.settings = settingsStore.load()
         self.database = database
@@ -97,6 +119,7 @@ final class AgentBarModel: ObservableObject {
 
         loadCachedCodexQuota()
         loadCachedResetCredits()
+        loadCachedGrokQuota()
         scheduleRefresh()
         scheduleStartupLocalUsageScan()
         Task { await refreshInstallMethod() }
@@ -146,6 +169,11 @@ final class AgentBarModel: ObservableObject {
             await refreshLocalUsage(currentDate: currentDate)
         }
         await refreshCodexQuota(
+            force: force,
+            currentDate: currentDate,
+            honorsRefreshInterval: honorsCodexRefreshInterval
+        )
+        await refreshGrokQuota(
             force: force,
             currentDate: currentDate,
             honorsRefreshInterval: honorsCodexRefreshInterval
@@ -276,6 +304,50 @@ final class AgentBarModel: ObservableObject {
         throw CodexQuotaRefreshError(attempts: codexQuotaRetryLimit, message: message)
     }
 
+    private func refreshGrokQuota(force: Bool, currentDate: Date, honorsRefreshInterval: Bool) async {
+        let minimumRefreshInterval = TimeInterval(settings.sanitized.codexRefreshIntervalSeconds)
+        if honorsRefreshInterval,
+           !force,
+           let lastGrokNetworkAttempt,
+           currentDate.timeIntervalSince(lastGrokNetworkAttempt) < minimumRefreshInterval {
+            _ = showCachedGrokSnapshot(now: currentDate, stale: shouldMarkCachedGrokQuotaStale(currentDate))
+            return
+        }
+
+        switch grokAuthLoader.load() {
+        case let .credentials(credentials):
+            lastGrokNetworkAttempt = currentDate
+            do {
+                let snapshot = try await grokQuotaClient.fetch(credentials: credentials)
+                lastSuccessfulGrokSnapshot = snapshot
+                grokQuotaState = .ready(snapshot, isStale: false)
+                grokQuotaRefreshFailure = nil
+                try? grokQuotaCacheStore.save(
+                    GrokQuotaCacheRecord(
+                        snapshot: snapshot,
+                        lastNetworkAttemptAt: currentDate,
+                        cachedAt: now()
+                    )
+                )
+            } catch {
+                let message = PrivacyScrubber.scrub(error.localizedDescription)
+                grokQuotaRefreshFailure = message
+                if !showCachedGrokSnapshot(now: now(), stale: true),
+                   !loadCachedGrokQuota(markStale: true) {
+                    grokQuotaState = .error(message)
+                }
+            }
+        case .unsupportedAPIKey:
+            showCachedGrokOrSet(.unsupportedAPIKey, currentDate: currentDate)
+        case .notLoggedIn:
+            showCachedGrokOrSet(.notLoggedIn, currentDate: currentDate)
+        case .notConfigured:
+            showCachedGrokOrSet(.notConfigured, currentDate: currentDate)
+        case let .invalid(message):
+            showCachedGrokOrSet(.error(message), currentDate: currentDate)
+        }
+    }
+
     func popoverOpened() {
         Task { await refresh(force: false) }
     }
@@ -333,6 +405,37 @@ final class AgentBarModel: ObservableObject {
         guard let record = try? resetCreditsCacheStore.load() else { return }
         lastSuccessfulResetCreditsSnapshot = record.snapshot
         resetCreditsState = .ready(record.snapshot)
+    }
+
+    @discardableResult
+    private func loadCachedGrokQuota(markStale: Bool = true) -> Bool {
+        guard let record = try? grokQuotaCacheStore.load() else { return false }
+        lastSuccessfulGrokSnapshot = record.snapshot
+        lastGrokNetworkAttempt = record.lastNetworkAttemptAt ?? record.snapshot.fetchedAt
+        return showCachedGrokSnapshot(now: now(), stale: markStale)
+    }
+
+    @discardableResult
+    private func showCachedGrokSnapshot(now currentDate: Date, stale: Bool) -> Bool {
+        guard let snapshot = lastSuccessfulGrokSnapshot else { return false }
+        let expired = currentDate > snapshot.resetsAt.addingTimeInterval(60)
+        let isStale = stale || expired || currentDate.timeIntervalSince(snapshot.fetchedAt) > freshQuotaTTL
+        grokQuotaState = .ready(snapshot, isStale: isStale)
+        return true
+    }
+
+    private func shouldMarkCachedGrokQuotaStale(_ currentDate: Date) -> Bool {
+        guard let snapshot = lastSuccessfulGrokSnapshot else { return true }
+        return currentDate > snapshot.resetsAt.addingTimeInterval(60)
+            || currentDate.timeIntervalSince(snapshot.fetchedAt) > freshQuotaTTL
+    }
+
+    private func showCachedGrokOrSet(_ state: GrokQuotaCardState, currentDate: Date) {
+        grokQuotaRefreshFailure = nil
+        if !showCachedGrokSnapshot(now: currentDate, stale: true),
+           !loadCachedGrokQuota(markStale: true) {
+            grokQuotaState = state
+        }
     }
 
     private func showCachedResetCreditsOrError(_ message: String) {
@@ -444,6 +547,10 @@ final class AgentBarModel: ObservableObject {
                     .filter(\.isEnabled)
                     .compactMap { menuBarPart(for: $0, snapshot: snapshot) }
             }
+            if settings.grokMenuBarShowsQuota,
+               case let .ready(snapshot, _) = grokQuotaState {
+                parts.append(grokMenuBarPart(snapshot: snapshot))
+            }
             if settings.codexMenuBarShowsLocalUsage {
                 parts.append(labeledLocalUsageMenuBarTitle)
             }
@@ -460,6 +567,7 @@ final class AgentBarModel: ObservableObject {
         let copy = AgentBarCopy(language: settings.language)
         let todayModel = usageSummary.todayTopModel?.model ?? copy.noModel
         var lines = codexTooltipLines(now: currentDate)
+        lines.append(contentsOf: grokTooltipLines(now: currentDate))
         lines.append(contentsOf: [
             "\(copy.today)    \(AgentBarFormatters.compactTokens(usageSummary.today.totalTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.today.costUSD)) · \(todayModel)",
             "\(copy.sevenDaysShort)     \(AgentBarFormatters.compactTokens(usageSummary.sevenDayTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.sevenDayCostUSD))",
@@ -609,6 +717,34 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
+    private func grokTooltipLines(now currentDate: Date) -> [String] {
+        let copy = AgentBarCopy(language: settings.language)
+        switch grokQuotaState {
+        case let .ready(snapshot, isStale):
+            let percent = grokQuotaPercent(snapshot)
+            let basis = copy.quotaBasisTitle(settings.grokQuotaPercentBasis).lowercased()
+            var lines = [
+                "Grok \(snapshot.periodLabel):  \(AgentBarFormatters.percent(percent)) \(basis) · \(AgentBarFormatters.relativeReset(from: currentDate, to: snapshot.resetsAt, language: settings.language))"
+            ]
+            if isStale {
+                let age = AgentBarFormatters.relativeAge(from: currentDate, to: snapshot.fetchedAt)
+                lines.append(settings.language == .simplifiedChinese ? "Grok 已过期 · 获取于 \(age)" : "Grok stale · fetched \(age)")
+            }
+            if let grokQuotaRefreshFailure { lines.append(grokQuotaRefreshFailure) }
+            return lines
+        case .unsupportedAPIKey:
+            return [settings.language == .simplifiedChinese ? "Grok: API key 模式不支持订阅余量查询" : "Grok: API key mode does not expose subscription quota"]
+        case .notConfigured:
+            return [settings.language == .simplifiedChinese ? "Grok: 未配置" : "Grok: Not configured"]
+        case .notLoggedIn:
+            return [settings.language == .simplifiedChinese ? "Grok: 未登录，请运行 grok login" : "Grok: Not signed in. Run grok login"]
+        case let .error(message):
+            return ["Grok: \(message)"]
+        case .loading:
+            return [settings.language == .simplifiedChinese ? "Grok: 正在刷新额度" : "Grok: Refreshing quota"]
+        }
+    }
+
     private func menuBarPart(for item: CodexMenuBarQuotaItem, snapshot: CodexQuotaSnapshot) -> String? {
         guard let window = snapshot.window(for: item.key) else {
             return nil
@@ -626,6 +762,19 @@ final class AgentBarModel: ObservableObject {
             return percent
         }
         return "\(item.key.label) \(percent)"
+    }
+
+    private func grokMenuBarPart(snapshot: GrokQuotaSnapshot) -> String {
+        "Grok \(AgentBarFormatters.percent(grokQuotaPercent(snapshot)))"
+    }
+
+    private func grokQuotaPercent(_ snapshot: GrokQuotaSnapshot) -> Double {
+        switch settings.grokQuotaPercentBasis {
+        case .used:
+            return snapshot.usedPercent
+        case .remaining:
+            return snapshot.remainingPercent
+        }
     }
 }
 

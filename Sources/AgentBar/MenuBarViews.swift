@@ -60,6 +60,7 @@ struct MenuBarPanelView: View {
     @State private var topModelLimit: TopModelLimit = .three
     @State private var customStartDate = Date().addingTimeInterval(-29 * 86_400)
     @State private var customEndDate = Date()
+    @State private var hoveredUsageChartModule: PanelModule?
 
     private static let panelWidth: CGFloat = 500
     private static let panelPadding: CGFloat = 16
@@ -130,6 +131,7 @@ struct MenuBarPanelView: View {
             } else {
                 ForEach(modules) { module in
                     panelModuleView(module, usageWindow: usageWindow)
+                        .zIndex(hoveredUsageChartModule == module ? 100 : 0)
                 }
             }
         }
@@ -148,8 +150,17 @@ struct MenuBarPanelView: View {
                 language: model.settings.language
             )
         case .trend:
-            UsageThirtyDayBarChartView(days: recentThirtyDayUsage, language: model.settings.language)
-                .zIndex(2)
+            UsageThirtyDayBarChartView(
+                days: recentThirtyDayUsage,
+                language: model.settings.language,
+                onHoverChange: { updateUsageChartHover(.trend, isHovering: $0) }
+            )
+        case .yearlyTrend:
+            UsageYearlyBarChartView(
+                months: currentYearMonthlyUsage,
+                language: model.settings.language,
+                onHoverChange: { updateUsageChartHover(.yearlyTrend, isHovering: $0) }
+            )
         case .codexQuota:
             CodexQuotaCardView(
                 state: model.quotaState,
@@ -163,6 +174,14 @@ struct MenuBarPanelView: View {
                     Task { await model.refreshResetCredits() }
                 }
             )
+        case .grokQuota:
+            GrokQuotaCardView(
+                state: model.grokQuotaState,
+                basis: model.settings.sanitized.grokQuotaPercentBasis,
+                refreshFailureMessage: model.grokQuotaRefreshFailure,
+                now: Date(),
+                language: model.settings.language
+            )
         case .heatmap:
             UsageHeatmapView(
                 days: model.usageSummary.heatmapDays,
@@ -174,6 +193,14 @@ struct MenuBarPanelView: View {
 
     private var visiblePanelModules: [PanelModule] {
         model.settings.sanitized.visiblePanelModules
+    }
+
+    private func updateUsageChartHover(_ module: PanelModule, isHovering: Bool) {
+        if isHovering {
+            hoveredUsageChartModule = module
+        } else if hoveredUsageChartModule == module {
+            hoveredUsageChartModule = nil
+        }
     }
 
     private var noVisibleModulesCard: some View {
@@ -233,6 +260,14 @@ struct MenuBarPanelView: View {
         let today = calendar.startOfDay(for: Date())
         let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
         return denseUsageDays(start: start, end: today, calendar: calendar)
+    }
+
+    private var currentYearMonthlyUsage: [DailyUsage] {
+        UsageAggregator.monthlyUsageForYear(
+            days: model.usageSummary.dailyUsageDays,
+            containing: Date(),
+            timeZone: model.settings.timeZone
+        )
     }
 
     private func denseUsageDays(start: Date, end: Date, calendar: Calendar) -> [DailyUsage] {
@@ -339,6 +374,266 @@ struct MenuBarPanelView: View {
             return copy.notRefreshed
         }
         return copy.updated(at: lastRefresh)
+    }
+}
+
+struct GrokQuotaCardView: View {
+    let state: GrokQuotaCardState
+    let basis: CodexQuotaPercentBasis
+    let refreshFailureMessage: String?
+    let now: Date
+    let language: AppLanguage
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showsProductUsage = false
+
+    var body: some View {
+        switch state {
+        case .loading:
+            statusCard(message: text("Refreshing quota...", "正在刷新额度…"), systemImage: "arrow.triangle.2.circlepath")
+        case let .ready(snapshot, isStale):
+            readyCard(snapshot: snapshot, isStale: isStale)
+        case .unsupportedAPIKey:
+            statusCard(
+                message: text("API key mode does not expose Grok subscription quota. Sign in with grok login.", "API key 模式不提供 Grok 订阅余量，请运行 grok login 登录。"),
+                systemImage: "key.slash"
+            )
+        case .notConfigured:
+            statusCard(message: text("Grok Build is not configured\ngrok login", "Grok Build 未配置\ngrok login"), systemImage: "terminal")
+        case .notLoggedIn:
+            statusCard(message: text("Not signed in. Run grok login", "未登录，请运行 grok login"), systemImage: "person.crop.circle.badge.exclamationmark")
+        case let .error(message):
+            statusCard(message: message, systemImage: "exclamationmark.triangle", severity: .critical)
+        }
+    }
+
+    private func readyCard(snapshot: GrokQuotaSnapshot, isStale: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        statusDot(snapshot.severity)
+                        Text("Grok Build")
+                            .font(.headline)
+                    }
+                    Text(refreshText(snapshot: snapshot, isStale: isStale))
+                        .font(.caption)
+                        .foregroundStyle(refreshFailureMessage == nil ? AgentBarStyle.secondaryText(colorScheme) : AgentBarStyle.red)
+                }
+                Spacer()
+                Text(AgentBarFormatters.percent(displayPercent(snapshot)))
+                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(color(for: snapshot.severity))
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(localizedPeriod(snapshot.periodLabel))
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("\(AgentBarFormatters.percent(displayPercent(snapshot))) \(basisLabel)")
+                        .font(.caption.monospacedDigit())
+                        .agentBarSecondaryText()
+                }
+                AgentBarProgressBar(value: displayPercent(snapshot) / 100, tint: color(for: snapshot.severity))
+                HStack {
+                    Text(text("Resets", "重置"))
+                    Spacer()
+                    Text(AgentBarFormatters.relativeReset(from: now, to: snapshot.resetsAt, language: language))
+                        .monospacedDigit()
+                }
+                .font(.caption2)
+                .agentBarSecondaryText()
+            }
+
+            if !snapshot.productUsage.isEmpty {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Label(text("Usage by source", "来源用量"), systemImage: "square.stack.3d.up")
+                            .font(.caption.weight(.semibold))
+
+                        Spacer()
+
+                        Button {
+                            showsProductUsage.toggle()
+                        } label: {
+                            Image(systemName: showsProductUsage ? "eye.slash" : "eye")
+                                .imageScale(.small)
+                        }
+                        .buttonStyle(AgentBarIconButtonStyle())
+                        .help(showsProductUsage
+                            ? text("Hide source usage", "隐藏来源用量")
+                            : text("Show source usage", "显示来源用量"))
+                        .accessibilityLabel(showsProductUsage
+                            ? text("Hide source usage", "隐藏来源用量")
+                            : text("Show source usage", "显示来源用量"))
+                    }
+
+                    if showsProductUsage {
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(snapshot.productUsage) { usage in
+                                productUsageRow(usage)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let used = snapshot.usedCents, let limit = snapshot.includedCents {
+                HStack {
+                    Label(text("Included spend", "订阅消费"), systemImage: "creditcard")
+                    Spacer()
+                    Text("\(AgentBarFormatters.usd(Double(abs(used)) / 100)) / \(AgentBarFormatters.usd(Double(abs(limit)) / 100))")
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .agentBarSecondaryText()
+            }
+
+            if let refreshFailureMessage {
+                Label(refreshFailureMessage, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(AgentBarStyle.red)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .agentBarCard(padding: 12)
+    }
+
+    private func statusCard(
+        message: String,
+        systemImage: String,
+        severity: CodexQuotaSeverity = .ok
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                statusDot(severity)
+                Text("Grok Build")
+                    .font(.headline)
+                Spacer()
+                Image(systemName: systemImage)
+                    .foregroundStyle(color(for: severity))
+            }
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(severity == .critical ? AgentBarStyle.red : AgentBarStyle.secondaryText(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .agentBarCard(padding: 12)
+    }
+
+    private func refreshText(snapshot: GrokQuotaSnapshot, isStale: Bool) -> String {
+        let time = snapshot.fetchedAt.formatted(date: .omitted, time: .shortened)
+        if refreshFailureMessage != nil {
+            return text("Refresh failed · cached \(time)", "刷新失败 · 缓存于 \(time)")
+        }
+        if isStale {
+            return text("Cached \(time)", "缓存于 \(time)")
+        }
+        return text("Updated \(time)", "更新于 \(time)")
+    }
+
+    private func localizedPeriod(_ value: String) -> String {
+        switch value {
+        case "Weekly": return text("Weekly limit", "每周限额")
+        case "Monthly": return text("Monthly limit", "每月限额")
+        default: return text("Usage limit", "使用限额")
+        }
+    }
+
+    private func displayPercent(_ snapshot: GrokQuotaSnapshot) -> Double {
+        switch basis {
+        case .used:
+            return snapshot.usedPercent
+        case .remaining:
+            return snapshot.remainingPercent
+        }
+    }
+
+    private var basisLabel: String {
+        switch basis {
+        case .used:
+            return text("used", "已用")
+        case .remaining:
+            return text("remaining", "剩余")
+        }
+    }
+
+    private func productUsageRow(_ usage: GrokQuotaProductUsage) -> some View {
+        let tint = productColor(usage.product)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 6, height: 6)
+                Text(productName(usage.product))
+                    .font(.caption)
+                    .lineLimit(1)
+                Spacer()
+                Text(AgentBarFormatters.percent(usage.usagePercent))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+            }
+            AgentBarProgressBar(value: usage.usagePercent / 100, tint: tint)
+        }
+    }
+
+    private func productName(_ product: String) -> String {
+        switch normalizedProduct(product) {
+        case "0", "PRODUCT_THIRD_PARTY":
+            return text("Third party", "第三方")
+        case "1", "PRODUCT_API":
+            return "API"
+        case "2", "PRODUCT_GROK_BUILD":
+            return "Grok Build"
+        case "3", "PRODUCT_GROK_PLUGINS":
+            return "Grok Plugins"
+        case "4", "PRODUCT_CHAT":
+            return text("Chat", "聊天")
+        case "5", "PRODUCT_IMAGINE":
+            return text("Imagine", "图像")
+        case "6", "PRODUCT_VOICE":
+            return text("Voice", "语音")
+        default:
+            return product
+                .replacingOccurrences(of: "PRODUCT_", with: "", options: [.caseInsensitive])
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+        }
+    }
+
+    private func productColor(_ product: String) -> Color {
+        switch normalizedProduct(product) {
+        case "1", "PRODUCT_API": return .blue
+        case "2", "PRODUCT_GROK_BUILD": return AgentBarStyle.green
+        case "3", "PRODUCT_GROK_PLUGINS": return .orange
+        case "4", "PRODUCT_CHAT": return .cyan
+        case "5", "PRODUCT_IMAGINE": return .purple
+        case "6", "PRODUCT_VOICE": return .pink
+        default: return .gray
+        }
+    }
+
+    private func normalizedProduct(_ product: String) -> String {
+        product.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func statusDot(_ severity: CodexQuotaSeverity) -> some View {
+        Circle().fill(color(for: severity)).frame(width: 8, height: 8)
+    }
+
+    private func color(for severity: CodexQuotaSeverity) -> Color {
+        switch severity {
+        case .ok: return AgentBarStyle.green
+        case .warning: return AgentBarStyle.yellow
+        case .critical: return AgentBarStyle.red
+        }
+    }
+
+    private func text(_ english: String, _ chinese: String) -> String {
+        language == .simplifiedChinese ? chinese : english
     }
 }
 
@@ -1526,9 +1821,53 @@ private struct AgentUsageDetailRow: View {
     }
 }
 
+private enum UsageBarChartGranularity {
+    case day
+    case month
+}
+
 struct UsageThirtyDayBarChartView: View {
     let days: [DailyUsage]
     let language: AppLanguage
+    let onHoverChange: (Bool) -> Void
+
+    var body: some View {
+        UsageBarChartView(
+            periods: days,
+            title: AgentBarCopy(language: language).trend30Days,
+            granularity: .day,
+            language: language,
+            onHoverChange: onHoverChange
+        )
+    }
+}
+
+struct UsageYearlyBarChartView: View {
+    let months: [DailyUsage]
+    let language: AppLanguage
+    let onHoverChange: (Bool) -> Void
+
+    var body: some View {
+        UsageBarChartView(
+            periods: months,
+            title: AgentBarCopy(language: language).yearlyTrendTitle(year),
+            granularity: .month,
+            language: language,
+            onHoverChange: onHoverChange
+        )
+    }
+
+    private var year: Int {
+        months.first.flatMap { Int($0.day.prefix(4)) } ?? Calendar.current.component(.year, from: Date())
+    }
+}
+
+private struct UsageBarChartView: View {
+    let periods: [DailyUsage]
+    let title: String
+    let granularity: UsageBarChartGranularity
+    let language: AppLanguage
+    let onHoverChange: (Bool) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var hoveredDay: DailyUsage?
 
@@ -1536,10 +1875,8 @@ struct UsageThirtyDayBarChartView: View {
     private let outputColor = Color(red: 0.95, green: 0.47, blue: 0.64)
     private let cachedColor = AgentBarStyle.green
     private let hoverCardWidth: CGFloat = 180
-
-    private var copy: AgentBarCopy {
-        AgentBarCopy(language: language)
-    }
+    private let hoverCardGap: CGFloat = 8
+    private let barSpacing: CGFloat = 3
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1550,7 +1887,7 @@ struct UsageThirtyDayBarChartView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(copy.trend30Days)
+                    Text(title)
                         .font(.caption.weight(.semibold))
                         .agentBarSecondaryText()
                     Spacer()
@@ -1560,56 +1897,70 @@ struct UsageThirtyDayBarChartView: View {
                 }
 
                 GeometryReader { proxy in
-                    ZStack(alignment: .topLeading) {
-                        HStack(alignment: .bottom, spacing: 3) {
-                            ForEach(days) { day in
-                                stackedBar(day: day, maxTokens: maxTokens, isHovered: hoveredDay?.day == day.day)
+                    VStack(spacing: 3) {
+                        HStack(alignment: .bottom, spacing: barSpacing) {
+                            ForEach(periods) { period in
+                                stackedBar(day: period, maxTokens: maxTokens, isHovered: hoveredDay?.day == period.day)
                                     .frame(maxWidth: .infinity)
                                     .contentShape(Rectangle())
                                     .onHover { isHovering in
                                         if isHovering {
-                                            hoveredDay = day
-                                        } else if hoveredDay?.day == day.day {
+                                            hoveredDay = period
+                                        } else if hoveredDay?.day == period.day {
                                             hoveredDay = nil
                                         }
                                     }
-                                    .help("\(displayDay(day.day)) · \(AgentBarFormatters.compactTokens(day.totalTokens)) · \(AgentBarFormatters.usd(day.costUSD))")
+                                    .accessibilityLabel(displayPeriod(period.day))
+                                    .accessibilityValue(AgentBarFormatters.compactTokens(period.totalTokens))
                             }
                         }
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+                        .frame(width: proxy.size.width, height: 56, alignment: .bottom)
+                        .overlay(alignment: .topLeading) {
+                            if let hoveredDay {
+                                UsagePeriodHoverCard(
+                                    title: displayPeriod(hoveredDay.day),
+                                    usage: hoveredDay,
+                                    language: language,
+                                    inputColor: inputColor,
+                                    outputColor: outputColor,
+                                    cachedColor: cachedColor
+                                )
+                                .zIndex(10)
+                                .allowsHitTesting(false)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                                .offset(x: hoverCardX(for: hoveredDay, chartWidth: proxy.size.width), y: 2)
+                            }
+                        }
 
-                        if let hoveredDay {
-                            UsageDayHoverCard(
-                                day: hoveredDay,
-                                language: language,
-                                inputColor: inputColor,
-                                outputColor: outputColor,
-                                cachedColor: cachedColor
-                            )
-                            .zIndex(10)
-                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-                            .offset(x: hoverCardX(for: hoveredDay, chartWidth: proxy.size.width), y: 2)
+                        if granularity == .month {
+                            monthAxisLabels
                         }
                     }
                     .animation(.easeOut(duration: 0.12), value: hoveredDay?.day)
                 }
-                .frame(height: 56)
+                .frame(height: granularity == .month ? 70 : 56)
             }
             .padding(8)
+        }
+        .onHover { isHovering in
+            if !isHovering {
+                hoveredDay = nil
+            }
+            onHoverChange(isHovering)
         }
     }
 
     private var totalTokens: Int64 {
-        days.reduce(Int64(0)) { $0 + $1.totalTokens }
+        periods.reduce(Int64(0)) { $0 + $1.totalTokens }
     }
 
     private var totalCost: Double? {
-        let values = days.compactMap(\.costUSD)
+        let values = periods.compactMap(\.costUSD)
         return values.isEmpty ? nil : values.reduce(0, +)
     }
 
     private var maxTokens: Int64 {
-        max(days.map(\.totalTokens).max() ?? 0, 1)
+        max(periods.map(\.totalTokens).max() ?? 0, 1)
     }
 
     private func stackedBar(day: DailyUsage, maxTokens: Int64, isHovered: Bool) -> some View {
@@ -1631,7 +1982,7 @@ struct UsageThirtyDayBarChartView: View {
                         .stroke(isHovered ? AgentBarStyle.primaryText(colorScheme).opacity(0.78) : Color.clear, lineWidth: 1.2)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .circular))
-                .scaleEffect(x: isHovered ? 1.25 : 1, y: isHovered ? 1.04 : 1, anchor: .bottom)
+                .scaleEffect(x: isHovered ? 1.08 : 1, y: 1, anchor: .bottom)
                 .shadow(color: isHovered ? AgentBarStyle.primaryText(colorScheme).opacity(0.18) : .clear, radius: 5, y: 1)
             }
         }
@@ -1646,33 +1997,66 @@ struct UsageThirtyDayBarChartView: View {
 
     private func hoverCardX(for day: DailyUsage, chartWidth: CGFloat) -> CGFloat {
         guard chartWidth > hoverCardWidth else { return 0 }
-        let dayCount = max(days.count, 1)
-        let index = days.firstIndex { $0.day == day.day } ?? dayCount - 1
-        let columnWidth = chartWidth / CGFloat(dayCount)
-        let selectedCenterX = (CGFloat(index) + 0.5) * columnWidth
-        if selectedCenterX < chartWidth / 2 {
-            let x = selectedCenterX + columnWidth * 1.5
-            return min(max(2, x), chartWidth - hoverCardWidth - 2)
-        }
-        return 2
+        let periodCount = max(periods.count, 1)
+        let index = periods.firstIndex { $0.day == day.day } ?? periodCount - 1
+        let totalSpacing = barSpacing * CGFloat(max(periodCount - 1, 0))
+        let columnWidth = max(0, chartWidth - totalSpacing) / CGFloat(periodCount)
+        let barLeftX = CGFloat(index) * (columnWidth + barSpacing)
+        let barRightX = barLeftX + columnWidth
+        let leftSpace = barLeftX
+        let rightSpace = chartWidth - barRightX
+        let preferredX = rightSpace >= leftSpace
+            ? barRightX + hoverCardGap
+            : barLeftX - hoverCardWidth - hoverCardGap
+        return min(max(2, preferredX), chartWidth - hoverCardWidth - 2)
     }
 
-    private func displayDay(_ day: String) -> String {
+    private var monthAxisLabels: some View {
+        HStack(spacing: 3) {
+            ForEach(periods) { period in
+                Text(shortMonth(period.day))
+                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .agentBarSecondaryText()
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 11)
+    }
+
+    private func displayPeriod(_ day: String) -> String {
         let parts = day.split(separator: "-")
         guard parts.count == 3,
               let month = Int(parts[1]),
               let dayOfMonth = Int(parts[2]) else {
             return day
         }
+        if granularity == .month {
+            let year = Int(parts[0]) ?? Calendar.current.component(.year, from: Date())
+            return language == .simplifiedChinese ? "\(year)年\(month)月" : "\(englishMonth(month)) \(year)"
+        }
         if language == .simplifiedChinese {
             return "\(month)月\(dayOfMonth)日"
         }
         return "\(month)/\(dayOfMonth)"
     }
+
+    private func shortMonth(_ day: String) -> String {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3, let month = Int(parts[1]) else { return day }
+        return language == .simplifiedChinese ? "\(month)月" : englishMonth(month)
+    }
+
+    private func englishMonth(_ month: Int) -> String {
+        let names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard names.indices.contains(month - 1) else { return String(month) }
+        return names[month - 1]
+    }
 }
 
-struct UsageDayHoverCard: View {
-    let day: DailyUsage
+struct UsagePeriodHoverCard: View {
+    let title: String
+    let usage: DailyUsage
     let language: AppLanguage
     let inputColor: Color
     let outputColor: Color
@@ -1686,11 +2070,11 @@ struct UsageDayHoverCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline) {
-                Text(displayDay(day.day))
+                Text(title)
                     .font(.caption.weight(.semibold))
                     .agentBarPrimaryText()
                 Spacer(minLength: 10)
-                Text(AgentBarFormatters.usd(day.costUSD))
+                Text(AgentBarFormatters.usd(usage.costUSD))
                     .font(.caption2.monospacedDigit())
                     .agentBarSecondaryText()
             }
@@ -1699,10 +2083,10 @@ struct UsageDayHoverCard: View {
                 .frame(height: 7)
 
             VStack(alignment: .leading, spacing: 4) {
-                metricRow(title: copy.total, value: day.totalTokens, color: AgentBarStyle.primaryText(colorScheme))
-                metricRow(title: copy.input, value: day.inputTokens, color: inputColor)
-                metricRow(title: copy.output, value: day.outputTokens + day.reasoningOutputTokens, color: outputColor)
-                metricRow(title: copy.cached, value: day.cachedInputTokens + day.cacheCreationInputTokens, color: cachedColor)
+                metricRow(title: copy.total, value: usage.totalTokens, color: AgentBarStyle.primaryText(colorScheme))
+                metricRow(title: copy.input, value: usage.inputTokens, color: inputColor)
+                metricRow(title: copy.output, value: usage.outputTokens + usage.reasoningOutputTokens, color: outputColor)
+                metricRow(title: copy.cached, value: usage.cachedInputTokens + usage.cacheCreationInputTokens, color: cachedColor)
             }
         }
         .padding(.horizontal, 9)
@@ -1721,10 +2105,10 @@ struct UsageDayHoverCard: View {
 
     private var miniStack: some View {
         GeometryReader { proxy in
-            let total = max(day.totalTokens, 1)
-            let cachedWidth = proxy.size.width * CGFloat(Double(day.cachedInputTokens + day.cacheCreationInputTokens) / Double(total))
-            let inputWidth = proxy.size.width * CGFloat(Double(day.inputTokens) / Double(total))
-            let outputWidth = proxy.size.width * CGFloat(Double(day.outputTokens + day.reasoningOutputTokens) / Double(total))
+            let total = max(usage.totalTokens, 1)
+            let cachedWidth = proxy.size.width * CGFloat(Double(usage.cachedInputTokens + usage.cacheCreationInputTokens) / Double(total))
+            let inputWidth = proxy.size.width * CGFloat(Double(usage.inputTokens) / Double(total))
+            let outputWidth = proxy.size.width * CGFloat(Double(usage.outputTokens + usage.reasoningOutputTokens) / Double(total))
             HStack(spacing: 0) {
                 cachedColor.frame(width: cachedWidth)
                 inputColor.frame(width: inputWidth)
@@ -1752,18 +2136,6 @@ struct UsageDayHoverCard: View {
         }
     }
 
-    private func displayDay(_ day: String) -> String {
-        let parts = day.split(separator: "-")
-        guard parts.count == 3,
-              let month = Int(parts[1]),
-              let dayOfMonth = Int(parts[2]) else {
-            return day
-        }
-        if language == .simplifiedChinese {
-            return "\(month)月\(dayOfMonth)日"
-        }
-        return "\(month)/\(dayOfMonth)"
-    }
 }
 
 struct UsageTotalsView: View {

@@ -298,6 +298,26 @@ struct SettingsView: View {
         )
     }
 
+    private var showGrokQuotaBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.grokMenuBarShowsQuota },
+            set: { showsQuota in
+                model.settings.grokMenuBarShowsQuota = showsQuota
+                model.persistSettings()
+            }
+        )
+    }
+
+    private var grokQuotaBasisBinding: Binding<CodexQuotaPercentBasis> {
+        Binding(
+            get: { model.settings.grokQuotaPercentBasis },
+            set: { basis in
+                model.settings.grokQuotaPercentBasis = basis
+                model.persistSettings()
+            }
+        )
+    }
+
     private var menuBarControls: some View {
         VStack(alignment: .leading, spacing: 9) {
             settingRow(copy.display, labelWidth: 82) {
@@ -351,6 +371,25 @@ struct SettingsView: View {
                         .frame(width: 154, alignment: .leading)
                         .disabled(!quotaItem(for: key).isEnabled)
                     }
+                }
+
+                settingRow(copy.grokQuota, labelWidth: 82) {
+                    Button {
+                        showGrokQuotaBinding.wrappedValue.toggle()
+                    } label: {
+                        AgentBarCheckbox(isOn: showGrokQuotaBinding.wrappedValue)
+                    }
+                    .fixedSize()
+                    .buttonStyle(.plain)
+                    .help(copy.showGrokQuotaInMenuBar)
+                    .accessibilityLabel(copy.showGrokQuotaInMenuBar)
+
+                    AgentBarSegmentedPicker(
+                        options: CodexQuotaPercentBasis.allCases,
+                        selection: grokQuotaBasisBinding,
+                        title: copy.quotaBasisTitle
+                    )
+                    .frame(width: 154, alignment: .leading)
                 }
 
                 settingRow(copy.usage, labelWidth: 82) {

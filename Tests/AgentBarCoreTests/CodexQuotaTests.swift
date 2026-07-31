@@ -326,6 +326,19 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertEqual(settings.visiblePanelModules, [.heatmap, .summary, .codexQuota])
     }
 
+    func testSettingsMigratesYearlyTrendIntoLegacyPanelLayoutOnce() throws {
+        let legacy = #"{"visiblePanelModules":["summary","trend","heatmap"]}"#
+        let migrated = try JSONDecoder().decode(AppSettings.self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(migrated.visiblePanelModules, [.summary, .trend, .yearlyTrend, .heatmap])
+        XCTAssertEqual(migrated.panelModuleLayoutVersion, 1)
+
+        var hidden = migrated
+        hidden.visiblePanelModules.removeAll { $0 == .yearlyTrend }
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(hidden))
+        XCTAssertFalse(decoded.visiblePanelModules.contains(.yearlyTrend))
+    }
+
     func testSettingsRoundTripsCombinedMenuBarUsage() throws {
         let settings = AppSettings(
             menuBarMetric: .usedCost,

@@ -13,6 +13,8 @@ struct AgentBarCopy {
     var display: String { text("Display", "显示") }
     var metric: String { text("Metric", "指标") }
     var labels: String { text("Labels", "标签") }
+    var grokQuota: String { text("Grok quota", "Grok 额度") }
+    var showGrokQuotaInMenuBar: String { text("Show Grok quota in the menu bar", "在菜单栏显示 Grok 额度") }
     var panelModules: String { text("Modules", "模块") }
     var moveUp: String { text("Move up", "上移") }
     var moveDown: String { text("Move down", "下移") }
@@ -136,11 +138,19 @@ struct AgentBarCopy {
             return text("Usage details", "用量明细")
         case .trend:
             return text("30 day trend", "30 天趋势")
+        case .yearlyTrend:
+            return text("Monthly usage this year", "今年各月用量")
         case .codexQuota:
             return text("Codex quota", "Codex 额度")
+        case .grokQuota:
+            return text("Grok quota", "Grok 额度")
         case .heatmap:
             return text("365 day heatmap", "365 天热力图")
         }
+    }
+
+    func yearlyTrendTitle(_ year: Int) -> String {
+        text("Monthly Usage · \(year)", "\(year) 年各月用量")
     }
 
     func quotaLabel(_ key: CodexQuotaKey) -> String {
