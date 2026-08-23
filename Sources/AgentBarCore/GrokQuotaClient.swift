@@ -9,6 +9,7 @@ public enum GrokQuotaClientError: LocalizedError, Equatable {
     case tokenExpired
     case forbidden
     case rateLimited
+    case authRefresh(String)
     case httpStatus(Int, String)
     case decoding(String)
     case responseTooLarge
@@ -23,6 +24,8 @@ public enum GrokQuotaClientError: LocalizedError, Equatable {
             return "Grok quota access was denied"
         case .rateLimited:
             return "Grok quota refresh was rate limited"
+        case let .authRefresh(message):
+            return message
         case let .httpStatus(status, message):
             return "Grok quota request failed (HTTP \(status)): \(message)"
         case let .decoding(message):

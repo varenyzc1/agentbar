@@ -314,11 +314,11 @@ final class AgentBarModel: ObservableObject {
             return
         }
 
-        switch grokAuthLoader.load() {
+        switch await grokAuthLoader.loadRefreshingIfNeeded() {
         case let .credentials(credentials):
             lastGrokNetworkAttempt = currentDate
             do {
-                let snapshot = try await grokQuotaClient.fetch(credentials: credentials)
+                let snapshot = try await fetchGrokQuotaWithTokenRefresh(credentials: credentials)
                 lastSuccessfulGrokSnapshot = snapshot
                 grokQuotaState = .ready(snapshot, isStale: false)
                 grokQuotaRefreshFailure = nil
@@ -345,6 +345,21 @@ final class AgentBarModel: ObservableObject {
             showCachedGrokOrSet(.notConfigured, currentDate: currentDate)
         case let .invalid(message):
             showCachedGrokOrSet(.error(message), currentDate: currentDate)
+        }
+    }
+
+    private func fetchGrokQuotaWithTokenRefresh(credentials: GrokCredentials) async throws -> GrokQuotaSnapshot {
+        do {
+            return try await grokQuotaClient.fetch(credentials: credentials)
+        } catch GrokQuotaClientError.tokenExpired {
+            switch await grokAuthLoader.loadRefreshingIfNeeded(force: true) {
+            case let .credentials(refreshedCredentials):
+                return try await grokQuotaClient.fetch(credentials: refreshedCredentials)
+            case let .invalid(message):
+                throw GrokQuotaClientError.authRefresh(message)
+            default:
+                throw GrokQuotaClientError.tokenExpired
+            }
         }
     }
 

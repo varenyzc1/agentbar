@@ -87,6 +87,156 @@ final class GrokSupportTests: XCTestCase {
         XCTAssertEqual(loader.load(), .unsupportedAPIKey)
     }
 
+    func testGrokAuthLoaderRefreshesExpiredTokenAndPersistsRotation() async throws {
+        let home = temporaryDirectory()
+        let grokHome = home.appendingPathComponent(".grok", isDirectory: true)
+        try FileManager.default.createDirectory(at: grokHome, withIntermediateDirectories: true)
+        let authURL = grokHome.appendingPathComponent("auth.json")
+        let auth = #"{"https://auth.x.ai::client":{"key":"expired-token","auth_mode":"oidc","create_time":"2026-07-31T00:00:00Z","expires_at":"2026-07-31T09:00:00Z","user_id":"user-42","email":"person@example.com","oidc_issuer":"https://auth.x.ai","oidc_client_id":"grok-client","refresh_token":"old-refresh","preserved":"value"}}"#
+        try Data(auth.utf8).write(to: authURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authURL.path)
+
+        let loader = GrokAuthLoader(
+            environment: { [:] },
+            homeDirectory: { home },
+            now: { self.fixedDate("2026-07-31T10:00:00Z") },
+            refreshCredentials: { issuer, clientID, refreshToken in
+                XCTAssertEqual(issuer, URL(string: "https://auth.x.ai"))
+                XCTAssertEqual(clientID, "grok-client")
+                XCTAssertEqual(refreshToken, "old-refresh")
+                return GrokTokenRefreshResult(
+                    accessToken: "fresh-token",
+                    refreshToken: "rotated-refresh",
+                    expiresIn: 6 * 60 * 60
+                )
+            }
+        )
+
+        let state = await loader.loadRefreshingIfNeeded()
+
+        XCTAssertEqual(
+            state,
+            .credentials(
+                GrokCredentials(
+                    accessToken: "fresh-token",
+                    userID: "user-42",
+                    displayName: "person@example.com"
+                )
+            )
+        )
+        let store = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: authURL)) as? [String: Any]
+        )
+        let record = try XCTUnwrap(store["https://auth.x.ai::client"] as? [String: Any])
+        XCTAssertEqual(record["key"] as? String, "fresh-token")
+        XCTAssertEqual(record["refresh_token"] as? String, "rotated-refresh")
+        XCTAssertEqual(record["expires_at"] as? String, "2026-07-31T16:00:00.000Z")
+        XCTAssertEqual(record["preserved"] as? String, "value")
+        let attributes = try FileManager.default.attributesOfItem(atPath: authURL.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testGrokAuthLoaderKeepsFreshTokenWithoutRefresh() async throws {
+        let home = temporaryDirectory()
+        let grokHome = home.appendingPathComponent(".grok", isDirectory: true)
+        try FileManager.default.createDirectory(at: grokHome, withIntermediateDirectories: true)
+        let auth = #"{"https://auth.x.ai::client":{"key":"fresh-token","auth_mode":"oidc","create_time":"2026-07-31T00:00:00Z","expires_at":"2026-07-31T16:00:00Z","user_id":"user-42","oidc_issuer":"https://auth.x.ai","oidc_client_id":"grok-client","refresh_token":"refresh"}}"#
+        try Data(auth.utf8).write(to: grokHome.appendingPathComponent("auth.json"))
+
+        let loader = GrokAuthLoader(
+            environment: { [:] },
+            homeDirectory: { home },
+            now: { self.fixedDate("2026-07-31T10:00:00Z") },
+            refreshCredentials: { _, _, _ in
+                XCTFail("A fresh token should not be refreshed")
+                return GrokTokenRefreshResult(accessToken: "unused", refreshToken: nil, expiresIn: nil)
+            }
+        )
+
+        let state = await loader.loadRefreshingIfNeeded()
+        XCTAssertEqual(
+            state,
+            .credentials(GrokCredentials(accessToken: "fresh-token", userID: "user-42", displayName: nil))
+        )
+    }
+
+    func testGrokAuthLoaderReportsExpiredTokenWhenRefreshFails() async throws {
+        let home = temporaryDirectory()
+        let grokHome = home.appendingPathComponent(".grok", isDirectory: true)
+        try FileManager.default.createDirectory(at: grokHome, withIntermediateDirectories: true)
+        let auth = #"{"https://auth.x.ai::client":{"key":"expired-token","auth_mode":"oidc","create_time":"2026-07-31T00:00:00Z","expires_at":"2026-07-31T09:00:00Z","user_id":"user-42","oidc_issuer":"https://auth.x.ai","oidc_client_id":"grok-client","refresh_token":"super-secret-refresh"}}"#
+        try Data(auth.utf8).write(to: grokHome.appendingPathComponent("auth.json"))
+
+        let loader = GrokAuthLoader(
+            environment: { [:] },
+            homeDirectory: { home },
+            now: { self.fixedDate("2026-07-31T10:00:00Z") },
+            refreshCredentials: { _, _, _ in throw GrokOIDCClientError.requestFailed(400, "invalid_grant") }
+        )
+
+        guard case let .invalid(message) = await loader.loadRefreshingIfNeeded() else {
+            return XCTFail("Expected an invalid auth state")
+        }
+        XCTAssertTrue(message.contains("invalid_grant"))
+        XCTAssertFalse(message.contains("expired-token"))
+        XCTAssertFalse(message.contains("super-secret-refresh"))
+    }
+
+    func testGrokOIDCClientDiscoversEndpointAndRefreshesToken() async throws {
+        let transport = MockGrokOIDCTransport(responses: [
+            (200, #"{"issuer":"https://auth.x.ai","token_endpoint":"https://auth.x.ai/oauth2/token"}"#),
+            (200, #"{"access_token":"fresh-token","refresh_token":"rotated-refresh","expires_in":21600}"#)
+        ])
+        let client = GrokOIDCClient(transport: transport)
+
+        let result = try await client.refresh(
+            issuer: URL(string: "https://auth.x.ai")!,
+            clientID: "grok-client",
+            refreshToken: "old-refresh"
+        )
+
+        XCTAssertEqual(
+            result,
+            GrokTokenRefreshResult(
+                accessToken: "fresh-token",
+                refreshToken: "rotated-refresh",
+                expiresIn: 21_600
+            )
+        )
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].httpMethod, "GET")
+        XCTAssertEqual(transport.requests[0].url?.path, "/.well-known/openid-configuration")
+        XCTAssertEqual(transport.requests[1].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[1].url?.path, "/oauth2/token")
+        let body = try XCTUnwrap(transport.requests[1].httpBody)
+        let form = URLComponents(string: "?" + String(decoding: body, as: UTF8.self))
+        let values = Dictionary(uniqueKeysWithValues: (form?.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        XCTAssertEqual(values["grant_type"], "refresh_token")
+        XCTAssertEqual(values["client_id"], "grok-client")
+        XCTAssertEqual(values["refresh_token"], "old-refresh")
+    }
+
+    func testGrokOIDCClientRejectsCrossOriginTokenEndpoint() async throws {
+        let transport = MockGrokOIDCTransport(responses: [
+            (200, #"{"token_endpoint":"https://example.com/token"}"#)
+        ])
+        let client = GrokOIDCClient(transport: transport)
+
+        do {
+            _ = try await client.refresh(
+                issuer: URL(string: "https://auth.x.ai")!,
+                clientID: "grok-client",
+                refreshToken: "refresh"
+            )
+            XCTFail("Expected an unsafe endpoint error")
+        } catch {
+            XCTAssertEqual(error as? GrokOIDCClientError, .unsafeTokenEndpoint)
+        }
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
     func testGrokQuotaParserSupportsCurrentWeeklyCreditsShape() throws {
         let now = fixedDate("2026-07-31T10:00:00Z")
         let body = #"{"config":{"creditUsagePercent":42.5,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-07-27T00:00:00Z","end":"2026-08-03T00:00:00Z"},"monthlyLimit":{"val":2000},"used":{"val":850},"prepaidBalance":{"val":100},"productUsage":[{"product":"PRODUCT_CHAT","usagePercent":12.5},{"product":"PRODUCT_GROK_BUILD","usagePercent":30}]}}"#
@@ -234,5 +384,26 @@ private final class MockGrokQuotaTransport: GrokQuotaHTTPTransport, @unchecked S
             headerFields: nil
         )!
         return (Data(body.utf8), response)
+    }
+}
+
+private final class MockGrokOIDCTransport: GrokOIDCHTTPTransport, @unchecked Sendable {
+    private let responses: [(status: Int, body: String)]
+    private(set) var requests: [URLRequest] = []
+
+    init(responses: [(Int, String)]) {
+        self.responses = responses
+    }
+
+    func data(for request: URLRequest, bodyLimit: Int) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let response = responses[requests.count - 1]
+        let http = HTTPURLResponse(
+            url: request.url!,
+            statusCode: response.status,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (Data(response.body.utf8), http)
     }
 }
