@@ -291,6 +291,31 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertEqual(snapshot.displayPlan, "Codex Pro Lite")
     }
 
+    func testPlanTagsPreserveReportedTierWithoutInferringMultiplier() throws {
+        let cases: [(String, String?)] = [
+            ("plus", "Plus"),
+            ("pro", "Pro"),
+            ("pro_5x", "Pro 5x"),
+            ("PRO-20X", "Pro 20x"),
+            (" pro\t5x\n", "Pro 5x"),
+            ("business", "Business"),
+            ("future_plan", "Future Plan"),
+            ("", nil),
+            (" \n\t", nil),
+            ("_-", nil)
+        ]
+        for (raw, expected) in cases {
+            let snapshot = try CodexQuotaParser.parse(
+                JSONSerialization.data(withJSONObject: ["plan_type": raw]),
+                now: Date(timeIntervalSince1970: 1_800_000_000),
+                source: "test",
+                accountDisplayName: nil
+            )
+            XCTAssertEqual(snapshot.displayPlanType, expected, raw)
+            XCTAssertEqual(snapshot.displayPlan, expected.map { "Codex \($0)" } ?? "Codex", raw)
+        }
+    }
+
     func testCodexQuotaCacheStoreRoundTripsSnapshot() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let snapshot = CodexQuotaSnapshot(

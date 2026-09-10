@@ -61,6 +61,23 @@ enum AgentBarStyle {
     }
 }
 
+struct AgentBarTag: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(AgentBarStyle.primaryText(colorScheme))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(AgentBarStyle.selectedBackground(colorScheme)))
+            .help(text)
+    }
+}
+
 struct AgentBarPanelBackground: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
