@@ -181,7 +181,7 @@ public struct CodexQuotaSnapshot: Codable, Equatable, Sendable {
         let trimmed = planType.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let words = trimmed
-            .split { $0 == "_" || $0 == "-" || $0 == " " }
+            .split { $0 == "_" || $0 == "-" || $0.isWhitespace }
             .map { word in
                 let lower = word.lowercased()
                 return lower.prefix(1).uppercased() + lower.dropFirst()

@@ -702,8 +702,11 @@ struct CodexQuotaCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         statusDot(snapshot.severity)
-                        Text(snapshot.displayPlan)
+                        Text("Codex")
                             .font(.headline)
+                        if let planType = snapshot.displayPlanType {
+                            AgentBarTag(text: planType)
+                        }
                     }
                     Text(refreshStatusText(snapshot: snapshot, isStale: isStale))
                         .font(.caption)
