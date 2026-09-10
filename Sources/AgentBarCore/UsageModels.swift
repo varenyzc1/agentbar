@@ -229,6 +229,47 @@ public struct DailyModelUsage: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct DailySourceUsage: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { "\(day):\(source)" }
+
+    public let day: String
+    public let source: String
+    public let inputTokens: Int64
+    public let outputTokens: Int64
+    public let cachedInputTokens: Int64
+    public let cacheCreationInputTokens: Int64
+    public let reasoningOutputTokens: Int64
+    public let costUSD: Double
+
+    public init(
+        day: String,
+        source: String,
+        inputTokens: Int64 = 0,
+        outputTokens: Int64 = 0,
+        cachedInputTokens: Int64 = 0,
+        cacheCreationInputTokens: Int64 = 0,
+        reasoningOutputTokens: Int64 = 0,
+        costUSD: Double = 0
+    ) {
+        self.day = day
+        self.source = source.isEmpty ? "unknown" : source
+        self.inputTokens = max(0, inputTokens)
+        self.outputTokens = max(0, outputTokens)
+        self.cachedInputTokens = max(0, cachedInputTokens)
+        self.cacheCreationInputTokens = max(0, cacheCreationInputTokens)
+        self.reasoningOutputTokens = max(0, reasoningOutputTokens)
+        self.costUSD = costUSD
+    }
+
+    public var cachedTokens: Int64 {
+        cachedInputTokens + cacheCreationInputTokens
+    }
+
+    public var totalTokens: Int64 {
+        inputTokens + outputTokens + cachedTokens + reasoningOutputTokens
+    }
+}
+
 public struct QuotaSnapshot: Codable, Equatable, Sendable {
     public let tokenBudget: Int?
     public let costBudgetUSD: Double?
@@ -273,6 +314,7 @@ public struct UsageSummary: Codable, Equatable, Sendable {
     public let sourceBreakdown7Days: [SourceUsage]
     public let dailyUsageDays: [DailyUsage]
     public let dailyModelUsageDays: [DailyModelUsage]
+    public let dailySourceUsageDays: [DailySourceUsage]
 
     public init(
         today: DailyUsage,
@@ -288,7 +330,8 @@ public struct UsageSummary: Codable, Equatable, Sendable {
         todayTopModel: ModelUsage? = nil,
         sourceBreakdown7Days: [SourceUsage] = [],
         dailyUsageDays: [DailyUsage] = [],
-        dailyModelUsageDays: [DailyModelUsage] = []
+        dailyModelUsageDays: [DailyModelUsage] = [],
+        dailySourceUsageDays: [DailySourceUsage] = []
     ) {
         self.today = today
         self.sevenDayTokens = sevenDayTokens
@@ -304,6 +347,7 @@ public struct UsageSummary: Codable, Equatable, Sendable {
         self.sourceBreakdown7Days = sourceBreakdown7Days
         self.dailyUsageDays = dailyUsageDays
         self.dailyModelUsageDays = dailyModelUsageDays
+        self.dailySourceUsageDays = dailySourceUsageDays
     }
 
     public static var empty: UsageSummary {

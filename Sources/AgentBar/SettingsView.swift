@@ -4,17 +4,29 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AgentBarModel
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var refreshIntervalSeconds = "300"
     @State private var monthlyTokenBudget = ""
     @State private var monthlyCostBudget = ""
     @State private var autosaveTask: Task<Void, Never>?
+    @State private var draggedPanelModule: PanelModule?
+    @State private var draggedPanelModuleStartIndex: Int?
+    @State private var draggedPanelModuleTargetIndex: Int?
+    @State private var panelModuleDragTranslation: CGFloat = 0
+
+    private let panelModuleRowStride: CGFloat = 38
+    private let panelModuleDragHysteresis: CGFloat = 0.65
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 compactSection(copy.menuBar) {
                     menuBarControls
+                }
+
+                compactSection(copy.panelModules) {
+                    panelModuleControls
                 }
 
                 HStack(alignment: .top, spacing: 12) {
@@ -276,6 +288,36 @@ struct SettingsView: View {
         )
     }
 
+    private var showLocalUsageBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.codexMenuBarShowsLocalUsage },
+            set: { showsLocalUsage in
+                model.settings.codexMenuBarShowsLocalUsage = showsLocalUsage
+                model.persistSettings()
+            }
+        )
+    }
+
+    private var showGrokQuotaBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.grokMenuBarShowsQuota },
+            set: { showsQuota in
+                model.settings.grokMenuBarShowsQuota = showsQuota
+                model.persistSettings()
+            }
+        )
+    }
+
+    private var grokQuotaBasisBinding: Binding<CodexQuotaPercentBasis> {
+        Binding(
+            get: { model.settings.grokQuotaPercentBasis },
+            set: { basis in
+                model.settings.grokQuotaPercentBasis = basis
+                model.persistSettings()
+            }
+        )
+    }
+
     private var menuBarControls: some View {
         VStack(alignment: .leading, spacing: 9) {
             settingRow(copy.display, labelWidth: 82) {
@@ -331,6 +373,43 @@ struct SettingsView: View {
                     }
                 }
 
+                settingRow(copy.grokQuota, labelWidth: 82) {
+                    Button {
+                        showGrokQuotaBinding.wrappedValue.toggle()
+                    } label: {
+                        AgentBarCheckbox(isOn: showGrokQuotaBinding.wrappedValue)
+                    }
+                    .fixedSize()
+                    .buttonStyle(.plain)
+                    .help(copy.showGrokQuotaInMenuBar)
+                    .accessibilityLabel(copy.showGrokQuotaInMenuBar)
+
+                    AgentBarSegmentedPicker(
+                        options: CodexQuotaPercentBasis.allCases,
+                        selection: grokQuotaBasisBinding,
+                        title: copy.quotaBasisTitle
+                    )
+                    .frame(width: 154, alignment: .leading)
+                }
+
+                settingRow(copy.usage, labelWidth: 82) {
+                    Button {
+                        showLocalUsageBinding.wrappedValue.toggle()
+                    } label: {
+                        AgentBarCheckbox(isOn: showLocalUsageBinding.wrappedValue)
+                    }
+                    .fixedSize()
+                    .buttonStyle(.plain)
+
+                    AgentBarSegmentedPicker(
+                        options: MenuBarMetric.allCases,
+                        selection: menuBarMetricBinding,
+                        title: copy.metricTitle
+                    )
+                    .frame(width: 260, alignment: .leading)
+                    .disabled(!showLocalUsageBinding.wrappedValue)
+                }
+
                 settingRow(copy.languageLabel, labelWidth: 82) {
                     AgentBarSegmentedPicker(
                         options: AppLanguage.allCases,
@@ -342,6 +421,162 @@ struct SettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var panelModuleControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(orderedPanelModules) { module in
+                panelModuleOrderRow(for: module)
+            }
+        }
+    }
+
+    private var orderedPanelModules: [PanelModule] {
+        let visible = PanelModule.normalized(model.settings.visiblePanelModules)
+        let hidden = PanelModule.allCases.filter { !visible.contains($0) }
+        return visible + hidden
+    }
+
+    @ViewBuilder
+    private func panelModuleOrderRow(for module: PanelModule) -> some View {
+        let binding = moduleVisibilityBinding(for: module)
+        let visibleModules = PanelModule.normalized(model.settings.visiblePanelModules)
+        let visibleIndex = visibleModules.firstIndex(of: module)
+        let isVisible = visibleIndex != nil
+
+        if isVisible {
+            panelModuleOrderRowBase(for: module, binding: binding, isVisible: isVisible)
+                .offset(y: panelModuleDragOffset(for: module))
+                .scaleEffect(draggedPanelModule == module ? 1.025 : 1)
+                .shadow(
+                    color: .black.opacity(draggedPanelModule == module ? 0.16 : 0),
+                    radius: draggedPanelModule == module ? 10 : 0,
+                    y: draggedPanelModule == module ? 5 : 0
+                )
+                .zIndex(draggedPanelModule == module ? 5 : 0)
+                .gesture(panelModuleDragGesture(for: module))
+        } else {
+            panelModuleOrderRowBase(for: module, binding: binding, isVisible: isVisible)
+        }
+    }
+
+    private func panelModuleOrderRowBase(
+        for module: PanelModule,
+        binding: Binding<Bool>,
+        isVisible: Bool
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                binding.wrappedValue.toggle()
+            } label: {
+                AgentBarCheckbox(isOn: binding.wrappedValue)
+            }
+            .fixedSize()
+            .buttonStyle(.plain)
+
+            moduleDragHandle(isEnabled: isVisible)
+
+            Text(copy.panelModuleTitle(module))
+                .font(.caption.weight(.medium))
+                .agentBarPrimaryText()
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .circular)
+                .fill(AgentBarStyle.fieldBackground(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .circular)
+                .stroke(AgentBarStyle.stroke(colorScheme), lineWidth: 0.8)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .circular))
+        .opacity(isVisible ? 1 : 0.68)
+    }
+
+    private func moduleDragHandle(isEnabled: Bool) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(AgentBarStyle.secondaryText(colorScheme))
+            .frame(width: 22, height: 24)
+            .opacity(isEnabled ? 1 : 0.35)
+            .help(copy.dragToReorder)
+    }
+
+    private func panelModuleDragGesture(for module: PanelModule) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                let modules = PanelModule.normalized(model.settings.visiblePanelModules)
+                guard let currentIndex = modules.firstIndex(of: module) else { return }
+
+                if draggedPanelModule != module {
+                    draggedPanelModule = module
+                    draggedPanelModuleStartIndex = currentIndex
+                    draggedPanelModuleTargetIndex = currentIndex
+                }
+
+                let translation = value.translation.height
+                panelModuleDragTranslation = translation
+                guard let startIndex = draggedPanelModuleStartIndex,
+                      let currentTargetIndex = draggedPanelModuleTargetIndex else { return }
+
+                let targetIndex = panelModuleDragTargetIndex(
+                    startIndex: startIndex,
+                    currentTargetIndex: currentTargetIndex,
+                    translation: translation,
+                    itemCount: modules.count
+                )
+                guard targetIndex != draggedPanelModuleTargetIndex else { return }
+
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    draggedPanelModuleTargetIndex = targetIndex
+                }
+            }
+            .onEnded { _ in
+                if let draggedPanelModule,
+                   let draggedPanelModuleTargetIndex {
+                    movePanelModule(draggedPanelModule, to: draggedPanelModuleTargetIndex)
+                    model.persistSettings()
+                }
+                withAnimation(.easeOut(duration: 0.14)) {
+                    draggedPanelModule = nil
+                    draggedPanelModuleStartIndex = nil
+                    draggedPanelModuleTargetIndex = nil
+                    panelModuleDragTranslation = 0
+                }
+            }
+    }
+
+    private func panelModuleDragOffset(for module: PanelModule) -> CGFloat {
+        let visibleModules = PanelModule.normalized(model.settings.visiblePanelModules)
+        guard let draggedPanelModule,
+              let startIndex = draggedPanelModuleStartIndex,
+              let targetIndex = draggedPanelModuleTargetIndex,
+              let currentIndex = visibleModules.firstIndex(of: module) else {
+            return 0
+        }
+
+        if module == draggedPanelModule {
+            return panelModuleDragTranslation
+        }
+
+        if targetIndex > startIndex,
+           currentIndex > startIndex,
+           currentIndex <= targetIndex {
+            return -panelModuleRowStride
+        }
+
+        if targetIndex < startIndex,
+           currentIndex >= targetIndex,
+           currentIndex < startIndex {
+            return panelModuleRowStride
+        }
+
+        return 0
     }
 
     private var footer: some View {
@@ -454,6 +689,61 @@ struct SettingsView: View {
                 }
             }
         )
+    }
+
+    private func moduleVisibilityBinding(for module: PanelModule) -> Binding<Bool> {
+        Binding(
+            get: { model.settings.visiblePanelModules.contains(module) },
+            set: { isVisible in
+                var modules = PanelModule.normalized(model.settings.visiblePanelModules)
+                if isVisible {
+                    if !modules.contains(module) {
+                        modules.append(module)
+                    }
+                } else {
+                    modules.removeAll { $0 == module }
+                }
+                model.settings.visiblePanelModules = PanelModule.normalized(modules)
+                model.persistSettings()
+            }
+        )
+    }
+
+    private func panelModuleDragTargetIndex(
+        startIndex: Int,
+        currentTargetIndex: Int,
+        translation: CGFloat,
+        itemCount: Int
+    ) -> Int {
+        guard itemCount > 0 else { return currentTargetIndex }
+
+        var targetIndex = min(max(currentTargetIndex, 0), itemCount - 1)
+        let forwardThreshold = panelModuleDragHysteresis
+        let dragDistance = translation / panelModuleRowStride
+
+        while targetIndex < itemCount - 1,
+              dragDistance > CGFloat(targetIndex - startIndex) + forwardThreshold {
+            targetIndex += 1
+        }
+
+        while targetIndex > 0,
+              dragDistance < CGFloat(targetIndex - startIndex) - forwardThreshold {
+            targetIndex -= 1
+        }
+
+        return min(max(targetIndex, 0), itemCount - 1)
+    }
+
+    private func movePanelModule(_ module: PanelModule, to targetIndex: Int) {
+        var modules = PanelModule.normalized(model.settings.visiblePanelModules)
+        guard let sourceIndex = modules.firstIndex(of: module),
+              modules.indices.contains(targetIndex),
+              sourceIndex != targetIndex else {
+            return
+        }
+        let moved = modules.remove(at: sourceIndex)
+        modules.insert(moved, at: min(targetIndex, modules.endIndex))
+        model.settings.visiblePanelModules = modules
     }
 
     private func loadFields() {

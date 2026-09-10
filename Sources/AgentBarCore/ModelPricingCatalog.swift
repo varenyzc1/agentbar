@@ -49,7 +49,13 @@ public enum ModelPricingCatalog {
         ModelPricing(pattern: "gemini-2.5-pro", family: "google", inputPerMTok: 1.25, outputPerMTok: 10.00, cacheReadPerMTok: 0.625, reasoningPerMTok: 10.00),
         ModelPricing(pattern: "gemini-2.5-flash", family: "google", inputPerMTok: 0.15, outputPerMTok: 0.60, cacheReadPerMTok: 0.075, reasoningPerMTok: 0.60),
 
-        ModelPricing(pattern: "grok-3", family: "xai", inputPerMTok: 3.00, outputPerMTok: 15.00, reasoningPerMTok: 15.00),
+        ModelPricing(pattern: "grok-4.5", family: "xai", inputPerMTok: 2.00, outputPerMTok: 6.00, cacheReadPerMTok: 0.30, cacheCreationPerMTok: 2.00, reasoningPerMTok: 6.00),
+        ModelPricing(pattern: "grok-build-0.1", family: "xai", inputPerMTok: 1.00, outputPerMTok: 2.00, cacheReadPerMTok: 0.20, cacheCreationPerMTok: 1.00, reasoningPerMTok: 2.00),
+        ModelPricing(pattern: "grok-build-latest", family: "xai", inputPerMTok: 2.00, outputPerMTok: 6.00, cacheReadPerMTok: 0.30, cacheCreationPerMTok: 2.00, reasoningPerMTok: 6.00),
+        ModelPricing(pattern: "grok-4.3", family: "xai", inputPerMTok: 1.25, outputPerMTok: 2.50, cacheReadPerMTok: 0.20, cacheCreationPerMTok: 1.25, reasoningPerMTok: 2.50),
+        ModelPricing(pattern: "grok-4.20", family: "xai", inputPerMTok: 1.25, outputPerMTok: 2.50, cacheReadPerMTok: 0.20, cacheCreationPerMTok: 1.25, reasoningPerMTok: 2.50),
+        ModelPricing(pattern: "grok-code-fast-1", family: "xai", inputPerMTok: 1.25, outputPerMTok: 2.50, cacheReadPerMTok: 0.20, cacheCreationPerMTok: 1.25, reasoningPerMTok: 2.50),
+        ModelPricing(pattern: "grok-3", family: "xai", inputPerMTok: 1.25, outputPerMTok: 2.50, cacheReadPerMTok: 0.20, cacheCreationPerMTok: 1.25, reasoningPerMTok: 2.50),
         ModelPricing(pattern: "deepseek-v3", family: "deepseek", inputPerMTok: 0.27, outputPerMTok: 1.10, reasoningPerMTok: 1.10),
         ModelPricing(pattern: "deepseek-r1", family: "deepseek", inputPerMTok: 0.55, outputPerMTok: 2.19, reasoningPerMTok: 2.19)
     ]

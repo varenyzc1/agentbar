@@ -13,6 +13,12 @@ struct AgentBarCopy {
     var display: String { text("Display", "显示") }
     var metric: String { text("Metric", "指标") }
     var labels: String { text("Labels", "标签") }
+    var grokQuota: String { text("Grok quota", "Grok 额度") }
+    var showGrokQuotaInMenuBar: String { text("Show Grok quota in the menu bar", "在菜单栏显示 Grok 额度") }
+    var panelModules: String { text("Modules", "模块") }
+    var moveUp: String { text("Move up", "上移") }
+    var moveDown: String { text("Move down", "下移") }
+    var dragToReorder: String { text("Drag to reorder", "拖动排序") }
     var languageLabel: String { text("Language", "语言") }
     var login: String { text("Login", "登录项") }
     var tokenBudget: String { text("Tokens", "Tokens") }
@@ -28,8 +34,21 @@ struct AgentBarCopy {
     var open: String { text("Open", "打开") }
     var settings: String { text("Settings", "设置") }
     var quit: String { text("Quit", "退出") }
+    var collapseRange: String { text("Hide range", "收起时间范围") }
+    var expandRange: String { text("Show range", "选择时间范围") }
     var notRefreshed: String { text("Not refreshed", "尚未刷新") }
     var refreshingQuota: String { text("Refreshing quota", "正在刷新额度") }
+    var resetCredits: String { text("Reset credits", "重置卡") }
+    var queryResetCredits: String { text("Refresh reset credits", "刷新重置卡") }
+    var queryingResetCredits: String { text("Querying reset credits", "正在查询重置卡") }
+    var hideResetCredits: String { text("Hide reset credits", "隐藏重置卡") }
+    var showResetCredits: String { text("Show reset credits", "显示重置卡") }
+    var resetCreditsHidden: String { text("Reset credits hidden", "重置卡已隐藏") }
+    var availableResetCredits: String { text("available", "可用") }
+    var earliestExpiration: String { text("Earliest", "最早到期") }
+    var allResetCredits: String { text("All reset credits", "全部重置卡") }
+    var noResetCredits: String { text("No reset credits returned", "没有返回重置卡") }
+    var expires: String { text("Expires", "到期") }
     var unsupportedAPIKey: String { text("API key mode does not support subscription quota. Sign in with a ChatGPT subscription.", "API key 模式不支持订阅额度，请使用 ChatGPT 订阅登录。") }
     var codexNotConfigured: String { text("Codex is not configured\ncodex login", "Codex 未配置\ncodex login") }
     var codexNotLoggedIn: String { text("Not signed in. Run codex login", "未登录，请运行 codex login") }
@@ -38,14 +57,15 @@ struct AgentBarCopy {
     var unavailable: String { text("unavailable", "不可用") }
     var stale: String { text("stale", "已过期") }
     var today: String { text("Today", "今日") }
+    var usage: String { text("Usage", "用量") }
     var sevenDaysShort: String { text("7D", "7 天") }
     var all: String { text("All", "全部") }
     var topModel: String { text("Top Model", "主要模型") }
     var noLocalUsageYet: String { text("No local usage yet", "暂无本地使用记录") }
+    var noVisibleModules: String { text("No visible modules", "未显示模块") }
     var days365: String { text("365 Days", "365 天") }
     var less: String { text("Less", "少") }
     var more: String { text("More", "多") }
-    var sources: String { text("Sources", "来源") }
     var byline: String { text("By varenyzc", "作者 varenyzc") }
     var contributorByline: String { text("By ZengWenJian123", "协作 ZengWenJian123") }
     var openGitHubRepository: String { text("Open GitHub repository", "打开 GitHub 仓库") }
@@ -61,6 +81,9 @@ struct AgentBarCopy {
     var output: String { text("Output", "输出") }
     var cached: String { text("Cached", "缓存") }
     var topModels: String { text("Top Models", "模型用量明细") }
+    var model: String { text("Model", "模型") }
+    var agent: String { text("Agent", "Agent") }
+    var agentUsage: String { text("Agent Usage", "Agent 使用") }
     var trend30Days: String { text("30 Day Trend", "近 30 天趋势") }
     var top3: String { text("Top 3", "Top 3") }
     var top5: String { text("Top 5", "Top 5") }
@@ -107,6 +130,29 @@ struct AgentBarCopy {
         }
     }
 
+    func panelModuleTitle(_ module: PanelModule) -> String {
+        switch module {
+        case .summary:
+            return text("Range summary", "范围摘要")
+        case .details:
+            return text("Usage details", "用量明细")
+        case .trend:
+            return text("30 day trend", "30 天趋势")
+        case .yearlyTrend:
+            return text("Monthly usage this year", "今年各月用量")
+        case .codexQuota:
+            return text("Codex quota", "Codex 额度")
+        case .grokQuota:
+            return text("Grok quota", "Grok 额度")
+        case .heatmap:
+            return text("365 day heatmap", "365 天热力图")
+        }
+    }
+
+    func yearlyTrendTitle(_ year: Int) -> String {
+        text("Monthly Usage · \(year)", "\(year) 年各月用量")
+    }
+
     func quotaLabel(_ key: CodexQuotaKey) -> String {
         text("\(key.label) quota", "\(key.label) 额度")
     }
@@ -119,6 +165,19 @@ struct AgentBarCopy {
             return text("7 day rolling window", "7 天滚动窗口")
         case .codeReview:
             return text("Code Review limit", "Code Review 限额")
+        }
+    }
+
+    func resetCreditStatus(_ status: String) -> String {
+        switch status.lowercased() {
+        case "available":
+            return text("Available", "可用")
+        case "redeemed":
+            return text("Redeemed", "已使用")
+        case "expired":
+            return text("Expired", "已过期")
+        default:
+            return status
         }
     }
 
@@ -217,6 +276,10 @@ struct AgentBarCopy {
             return "已更新"
         case "Unable to refresh Codex quota":
             return "无法刷新 Codex 额度"
+        case "Reset credits updated":
+            return "重置卡已更新"
+        case "Reset credits failed":
+            return "重置卡查询失败"
         case "Pricing reset":
             return "价格已重置"
         case "Pricing reset failed":

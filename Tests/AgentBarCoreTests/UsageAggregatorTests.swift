@@ -63,6 +63,33 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(summary.heatmapDays.first?.level, 0)
     }
 
+    func testMonthlyUsageForYearBuildsTwelveDetailedBuckets() {
+        let days = [
+            DailyUsage(day: "2025-12-31", inputTokens: 999, costUSD: 9),
+            DailyUsage(day: "2026-01-02", inputTokens: 100, cachedInputTokens: 30, costUSD: 1),
+            DailyUsage(day: "2026-01-20", outputTokens: 40, reasoningOutputTokens: 10, costUSD: 2),
+            DailyUsage(day: "2026-02-03", cacheCreationInputTokens: 25),
+            DailyUsage(day: "2027-01-01", inputTokens: 888, costUSD: 8)
+        ]
+
+        let months = UsageAggregator.monthlyUsageForYear(
+            days: days,
+            containing: fixedDate("2026-08-01T00:00:00Z"),
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+
+        XCTAssertEqual(months.count, 12)
+        XCTAssertEqual(months.map(\.day), (1...12).map { String(format: "2026-%02d-01", $0) })
+        XCTAssertEqual(months[0].inputTokens, 100)
+        XCTAssertEqual(months[0].outputTokens, 40)
+        XCTAssertEqual(months[0].cachedInputTokens, 30)
+        XCTAssertEqual(months[0].reasoningOutputTokens, 10)
+        XCTAssertEqual(months[0].costUSD, 3)
+        XCTAssertEqual(months[1].cacheCreationInputTokens, 25)
+        XCTAssertNil(months[1].costUSD)
+        XCTAssertEqual(months[11].totalTokens, 0)
+    }
+
     private func fixedDate(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
     }

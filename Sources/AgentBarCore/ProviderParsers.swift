@@ -135,8 +135,9 @@ public struct CodexSessionParser: ProviderParser {
     public func parseFile(at url: URL, fromOffset: Int64?) throws -> [TokenEntry] {
         let project = (try? Self.projectName(in: url)) ?? "unknown"
         let rows = try JSONLineReader.objects(at: url, fromOffset: fromOffset)
+        let metadataRows = fromOffset == nil ? rows : (try? JSONLineReader.objects(at: url, fromOffset: nil)) ?? rows
         let fallbackDate = ProviderJSON.fileModificationDate(url) ?? Date()
-        let fallbackModel = Self.modelName(in: rows) ?? "unknown"
+        let fallbackModel = Self.modelName(in: metadataRows) ?? "unknown"
 
         return rows.compactMap { row in
             guard ProviderJSON.string(row.object, "type") == "event_msg",
@@ -353,6 +354,149 @@ public struct GeminiCLIParser: ProviderParser {
     private static func projectName(from url: URL) -> String {
         let sessionDirectory = url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
         return sessionDirectory.isEmpty ? "unknown" : sessionDirectory
+    }
+}
+
+/// Parses the durable per-turn usage records written by the official Grok Build CLI.
+///
+/// Grok stores sessions below `$GROK_HOME/sessions` (or `~/.grok/sessions`). A
+/// `turn_completed` update contains a prompt-scoped bill and an optional
+/// `modelUsage` breakdown. Parent turns already fold subagent usage, so files
+/// below a `subagents` directory are intentionally ignored to avoid double
+/// counting.
+public struct GrokBuildParser: ProviderParser {
+    public let sourceID = "grok-build"
+    private let environment: @Sendable () -> [String: String]
+    private let homeDirectory: URL
+
+    public init(
+        environment: @escaping @Sendable () -> [String: String] = { ProcessInfo.processInfo.environment },
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
+        self.environment = environment
+        self.homeDirectory = homeDirectory
+    }
+
+    public var scanRoots: [URL] {
+        let root = environment()["GROK_HOME"].flatMap { value -> URL? in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : URL(fileURLWithPath: trimmed, isDirectory: true)
+        } ?? homeDirectory.appendingPathComponent(".grok", isDirectory: true)
+        return [root.appendingPathComponent("sessions", isDirectory: true)]
+    }
+
+    public func shouldParseFile(_ url: URL) -> Bool {
+        guard url.lastPathComponent == "updates.jsonl" else { return false }
+        return !url.pathComponents.contains("subagents")
+    }
+
+    public func parseFile(at url: URL, fromOffset: Int64?) throws -> [TokenEntry] {
+        let rows = try JSONLineReader.objects(at: url, fromOffset: fromOffset)
+        let project = Self.projectName(from: url)
+        let fallbackDate = ProviderJSON.fileModificationDate(url) ?? Date()
+        var entries: [TokenEntry] = []
+
+        for row in rows {
+            guard let params = ProviderJSON.dictionary(row.object["params"]),
+                  let update = ProviderJSON.dictionary(params["update"]),
+                  ProviderJSON.string(update, "sessionUpdate") == "turn_completed",
+                  let usage = ProviderJSON.dictionary(update["usage"]) else {
+                continue
+            }
+
+            let timestamp = ProviderJSON.date(row.object["timestamp"]) ?? fallbackDate
+            let sessionID = ProviderJSON.string(params, "sessionId") ?? url.deletingLastPathComponent().lastPathComponent
+            let promptID = ProviderJSON.string(update, "prompt_id") ?? "line-\(row.lineNumber)"
+            let modelUsage = ProviderJSON.dictionary(usage["modelUsage"]) ?? [:]
+
+            if modelUsage.isEmpty {
+                if let entry = Self.entry(
+                    usage: usage,
+                    sourceID: sourceID,
+                    model: Self.summaryModel(from: url) ?? "unknown",
+                    project: project,
+                    timestamp: timestamp,
+                    dedupKey: "\(sourceID):\(sessionID):\(promptID):totals"
+                ) {
+                    entries.append(entry)
+                }
+                continue
+            }
+
+            for model in modelUsage.keys.sorted() {
+                guard let modelTokens = ProviderJSON.dictionary(modelUsage[model]),
+                      let entry = Self.entry(
+                        usage: modelTokens,
+                        sourceID: sourceID,
+                        model: model,
+                        project: project,
+                        timestamp: timestamp,
+                        dedupKey: "\(sourceID):\(sessionID):\(promptID):\(model)"
+                      ) else {
+                    continue
+                }
+                entries.append(entry)
+            }
+        }
+
+        return entries
+    }
+
+    private static func entry(
+        usage: [String: Any],
+        sourceID: String,
+        model: String,
+        project: String,
+        timestamp: Date,
+        dedupKey: String
+    ) -> TokenEntry? {
+        let inputRaw = ProviderJSON.int64(usage, "inputTokens")
+        let outputRaw = ProviderJSON.int64(usage, "outputTokens")
+        let cachedRaw = ProviderJSON.int64(usage, "cachedReadTokens")
+        let cacheCreateRaw = ProviderJSON.int64(usage, "cacheCreationTokens")
+        let reasoningRaw = ProviderJSON.int64(usage, "reasoningTokens")
+        guard inputRaw + outputRaw + cachedRaw + cacheCreateRaw + reasoningRaw > 0 else {
+            return nil
+        }
+
+        let normalized = ProviderJSON.normalizedOverlappingTokens(
+            inputRaw: inputRaw,
+            outputRaw: outputRaw,
+            cachedRaw: cachedRaw,
+            cacheCreateRaw: cacheCreateRaw,
+            reasoningRaw: reasoningRaw
+        )
+        return TokenEntry(
+            source: sourceID,
+            model: model,
+            project: project,
+            timestamp: timestamp,
+            inputTokens: normalized.input,
+            outputTokens: normalized.output,
+            cachedInputTokens: normalized.cached,
+            cacheCreationInputTokens: normalized.cacheCreate,
+            reasoningOutputTokens: normalized.reasoning,
+            dedupKey: dedupKey
+        )
+    }
+
+    private static func projectName(from url: URL) -> String {
+        guard let data = try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent("summary.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let info = ProviderJSON.dictionary(object["info"]),
+              let cwd = ProviderJSON.string(info, "cwd") else {
+            return "unknown"
+        }
+        let name = URL(fileURLWithPath: cwd, isDirectory: true).lastPathComponent
+        return name.isEmpty ? "unknown" : name
+    }
+
+    private static func summaryModel(from url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent("summary.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return ProviderJSON.string(object, "current_model_id")
     }
 }
 

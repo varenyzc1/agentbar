@@ -212,6 +212,12 @@ final class CodexQuotaTests: XCTestCase {
         }
     }
 
+    func testURLSessionTransportPreservesSystemProxyConfiguration() {
+        let session = URLSessionCodexQuotaTransport.makeSession()
+
+        XCTAssertNil(session.configuration.connectionProxyDictionary)
+    }
+
     func testParserClampsAndMarksStaleWindows() throws {
         let now = Date(timeIntervalSince1970: 1_000)
         let body = """
@@ -241,6 +247,54 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertNil(snapshot.droppingExpiredWindows(now: now)?.window(for: .sevenDay))
     }
 
+    func testParserRecognizesSevenDayPrimaryWindowWithoutFiveHourWindow() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let body = """
+        {
+          "plan_type": "prolite",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 37.5,
+              "reset_at": 2000,
+              "limit_window_seconds": 604800
+            },
+            "secondary_window": null
+          }
+        }
+        """
+
+        let snapshot = try CodexQuotaParser.parse(Data(body.utf8), now: now, source: "test", accountDisplayName: nil)
+
+        XCTAssertNil(snapshot.window(for: .fiveHour))
+        XCTAssertEqual(snapshot.window(for: .sevenDay)?.usedPercent, 37.5)
+        XCTAssertEqual(snapshot.windows.map(\.key), [.sevenDay])
+    }
+
+    func testSnapshotDecodingMigratesMisclassifiedSevenDayCacheWindow() throws {
+        let cached = """
+        {
+          "planType": "prolite",
+          "windows": [{
+            "key": "five_hour",
+            "usedPercent": 37.5,
+            "remainingPercent": 62.5,
+            "resetsAt": 1000,
+            "limitWindowSeconds": 604800,
+            "stale": false
+          }],
+          "fetchedAt": 900,
+          "source": "cache"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+
+        let snapshot = try decoder.decode(CodexQuotaSnapshot.self, from: Data(cached.utf8))
+
+        XCTAssertNil(snapshot.window(for: .fiveHour))
+        XCTAssertEqual(snapshot.window(for: .sevenDay)?.usedPercent, 37.5)
+    }
+
     func testPrivacyScrubberRedactsBearerAPIKeyAndSSOQuery() {
         let scrubbed = PrivacyScrubber.scrub(
             "Bearer abc.def sk-abc123 https://x.test?a=1&sso_access_token=secret&sso_client_id=client"
@@ -259,7 +313,42 @@ final class CodexQuotaTests: XCTestCase {
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.basis), [.used, .used])
         XCTAssertEqual(settings.codexMenuBarQuotaItems.map(\.isEnabled), [true, true])
         XCTAssertEqual(settings.codexMenuBarShowsQuotaLabels, true)
+        XCTAssertEqual(settings.codexMenuBarShowsLocalUsage, false)
+        XCTAssertEqual(settings.visiblePanelModules, PanelModule.defaults)
         XCTAssertEqual(settings.language, .english)
+    }
+
+    func testSettingsNormalizeVisiblePanelModules() {
+        let settings = AppSettings(
+            visiblePanelModules: [.heatmap, .summary, .summary, .codexQuota]
+        )
+
+        XCTAssertEqual(settings.visiblePanelModules, [.heatmap, .summary, .codexQuota])
+    }
+
+    func testSettingsMigratesYearlyTrendIntoLegacyPanelLayoutOnce() throws {
+        let legacy = #"{"visiblePanelModules":["summary","trend","heatmap"]}"#
+        let migrated = try JSONDecoder().decode(AppSettings.self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(migrated.visiblePanelModules, [.summary, .trend, .yearlyTrend, .heatmap])
+        XCTAssertEqual(migrated.panelModuleLayoutVersion, 1)
+
+        var hidden = migrated
+        hidden.visiblePanelModules.removeAll { $0 == .yearlyTrend }
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(hidden))
+        XCTAssertFalse(decoded.visiblePanelModules.contains(.yearlyTrend))
+    }
+
+    func testSettingsRoundTripsCombinedMenuBarUsage() throws {
+        let settings = AppSettings(
+            menuBarMetric: .usedCost,
+            codexMenuBarShowsLocalUsage: true
+        )
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+
+        XCTAssertEqual(decoded.menuBarMetric, .usedCost)
+        XCTAssertTrue(decoded.codexMenuBarShowsLocalUsage)
     }
 
     func testSettingsNormalizeMenuBarItemsToSupportedWindows() {

@@ -15,6 +15,8 @@ public struct UsageScanResult: Equatable, Sendable {
 }
 
 public final class UsageScanner: @unchecked Sendable {
+    private static let scanCacheVersion = "4"
+
     private let database: UsageDatabase
     private let parsers: [ProviderParser]
     private let fileManager: FileManager
@@ -30,13 +32,19 @@ public final class UsageScanner: @unchecked Sendable {
         self.parsers = parsers ?? [
             ClaudeCodeParser(),
             CodexSessionParser(),
-            GeminiCLIParser()
+            GeminiCLIParser(),
+            GrokBuildParser()
         ]
         self.fileManager = fileManager
         self.logger = logger ?? UsageScannerLogger.defaultLogger()
     }
 
     public func scan() throws -> UsageScanResult {
+        _ = try database.prepareForScan(
+            cacheVersion: Self.scanCacheVersion,
+            sourceIDs: parsers.map(\.sourceID)
+        )
+
         var result = UsageScanResult()
         var addDeltaEntries: [TokenEntry] = []
         var maxSnapshotEntries: [TokenEntry] = []

@@ -155,6 +155,36 @@ public final class UsageDatabase: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    public func prepareForScan(cacheVersion: String, sourceIDs: [String]) throws -> Bool {
+        try locked {
+            let uniqueSources = Array(Set(sourceIDs)).filter { !$0.isEmpty }.sorted()
+            let staleSources = try uniqueSources.filter { sourceID in
+                try metaValueUnlocked(key: Self.scanCacheVersionKey(for: sourceID)) != cacheVersion
+            }
+            guard !staleSources.isEmpty else { return false }
+
+            try executeUnlocked("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                for sourceID in staleSources {
+                    try deleteBucketsUnlocked(source: sourceID)
+                    try deleteScanFilesUnlocked(source: sourceID)
+                    try setMetaUnlocked(key: Self.scanCacheVersionKey(for: sourceID), value: cacheVersion)
+                }
+                try setMetaUnlocked(key: "scan_cache_version", value: cacheVersion)
+                try executeUnlocked("COMMIT;")
+                return true
+            } catch {
+                try? executeUnlocked("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    private static func scanCacheVersionKey(for sourceID: String) -> String {
+        "scan_cache_version:\(sourceID)"
+    }
+
     public func ingest(entries: [TokenEntry], strategy: BucketMergeStrategy = .addDelta, syncedAt: Date = Date()) throws -> Int {
         guard !entries.isEmpty else { return 0 }
 
@@ -206,8 +236,9 @@ public final class UsageDatabase: @unchecked Sendable {
             let todayTopModel = try topModelUnlocked(whereClause: "bucket_date_local = ?", values: [todayKey])
             let sourceBreakdown = try sourceBreakdownUnlocked(startDay: sevenDayStart)
             let heatmapDays = try heatmapUnlocked(startDay: heatmapStart, today: todayDate, calendar: calendar)
-            let dailyUsageDays = try dailyUsageUnlocked(startDay: heatmapStart)
-            let dailyModelUsageDays = try dailyModelUsageUnlocked(startDay: heatmapStart)
+            let dailyUsageDays = try dailyUsageUnlocked(startDay: nil)
+            let dailyModelUsageDays = try dailyModelUsageUnlocked(startDay: nil)
+            let dailySourceUsageDays = try dailySourceUsageUnlocked(startDay: nil)
 
             let quota = QuotaSnapshot(
                 tokenBudget: settings.monthlyTokenBudget,
@@ -232,7 +263,8 @@ public final class UsageDatabase: @unchecked Sendable {
                 todayTopModel: todayTopModel,
                 sourceBreakdown7Days: sourceBreakdown,
                 dailyUsageDays: dailyUsageDays,
-                dailyModelUsageDays: dailyModelUsageDays
+                dailyModelUsageDays: dailyModelUsageDays,
+                dailySourceUsageDays: dailySourceUsageDays
             )
         }
     }
@@ -300,8 +332,8 @@ public final class UsageDatabase: @unchecked Sendable {
             try executeUnlocked("PRAGMA synchronous = NORMAL;")
             try createSchemaUnlocked()
             try seedDefaultPricingUnlocked(force: false)
-            try setMetaUnlocked(key: "schema_version", value: "1")
-            try setMetaUnlocked(key: "scan_cache_version", value: "1")
+            try setMetaIfMissingUnlocked(key: "schema_version", value: "1")
+            try setMetaIfMissingUnlocked(key: "scan_cache_version", value: "1")
         }
     }
 
@@ -428,6 +460,45 @@ public final class UsageDatabase: @unchecked Sendable {
         ) { statement in
             try bindText(key, to: statement, at: 1)
             try bindText(value, to: statement, at: 2)
+        }
+    }
+
+    private func setMetaIfMissingUnlocked(key: String, value: String) throws {
+        try executePreparedUnlocked(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?);"
+        ) { statement in
+            try bindText(key, to: statement, at: 1)
+            try bindText(value, to: statement, at: 2)
+        }
+    }
+
+    private func metaValueUnlocked(key: String) throws -> String? {
+        var value: String?
+        try queryUnlocked(
+            "SELECT value FROM meta WHERE key = ?;",
+            bind: { statement in
+                try bindText(key, to: statement, at: 1)
+            },
+            row: { statement in
+                value = columnString(statement, 0)
+            }
+        )
+        return value
+    }
+
+    private func deleteBucketsUnlocked(source: String) throws {
+        try executePreparedUnlocked(
+            "DELETE FROM usage_buckets WHERE source = ?;"
+        ) { statement in
+            try bindText(source, to: statement, at: 1)
+        }
+    }
+
+    private func deleteScanFilesUnlocked(source: String) throws {
+        try executePreparedUnlocked(
+            "DELETE FROM scan_files WHERE source = ?;"
+        ) { statement in
+            try bindText(source, to: statement, at: 1)
         }
     }
 
@@ -645,8 +716,9 @@ public final class UsageDatabase: @unchecked Sendable {
         return rows
     }
 
-    private func dailyUsageUnlocked(startDay: String) throws -> [DailyUsage] {
+    private func dailyUsageUnlocked(startDay: String?) throws -> [DailyUsage] {
         var rows: [DailyUsage] = []
+        let whereClause = startDay.map { _ in "WHERE bucket_date_local >= ?" } ?? ""
         try queryUnlocked(
             """
             SELECT bucket_date_local,
@@ -658,12 +730,14 @@ public final class UsageDatabase: @unchecked Sendable {
                    SUM(estimated_cost_usd),
                    COUNT(*)
             FROM usage_buckets
-            WHERE bucket_date_local >= ?
+            \(whereClause)
             GROUP BY bucket_date_local
             ORDER BY bucket_date_local ASC;
             """,
             bind: { statement in
-                try bindText(startDay, to: statement, at: 1)
+                if let startDay {
+                    try bindText(startDay, to: statement, at: 1)
+                }
             },
             row: { statement in
                 rows.append(
@@ -683,8 +757,9 @@ public final class UsageDatabase: @unchecked Sendable {
         return rows
     }
 
-    private func dailyModelUsageUnlocked(startDay: String) throws -> [DailyModelUsage] {
+    private func dailyModelUsageUnlocked(startDay: String?) throws -> [DailyModelUsage] {
         var rows: [DailyModelUsage] = []
+        let whereClause = startDay.map { _ in "WHERE bucket_date_local >= ?" } ?? ""
         try queryUnlocked(
             """
             SELECT bucket_date_local,
@@ -696,20 +771,61 @@ public final class UsageDatabase: @unchecked Sendable {
                    SUM(reasoning_output_tokens),
                    SUM(estimated_cost_usd)
             FROM usage_buckets
-            WHERE bucket_date_local >= ?
-              AND TRIM(LOWER(model)) != 'unknown'
-              AND TRIM(model) != ''
+            \(whereClause)
             GROUP BY bucket_date_local, model
             ORDER BY bucket_date_local ASC, model ASC;
             """,
             bind: { statement in
-                try bindText(startDay, to: statement, at: 1)
+                if let startDay {
+                    try bindText(startDay, to: statement, at: 1)
+                }
             },
             row: { statement in
                 rows.append(
                     DailyModelUsage(
                         day: columnString(statement, 0),
                         model: columnString(statement, 1),
+                        inputTokens: sqlite3_column_int64(statement, 2),
+                        outputTokens: sqlite3_column_int64(statement, 3),
+                        cachedInputTokens: sqlite3_column_int64(statement, 4),
+                        cacheCreationInputTokens: sqlite3_column_int64(statement, 5),
+                        reasoningOutputTokens: sqlite3_column_int64(statement, 6),
+                        costUSD: sqlite3_column_double(statement, 7)
+                    )
+                )
+            }
+        )
+        return rows
+    }
+
+    private func dailySourceUsageUnlocked(startDay: String?) throws -> [DailySourceUsage] {
+        var rows: [DailySourceUsage] = []
+        let whereClause = startDay.map { _ in "WHERE bucket_date_local >= ?" } ?? ""
+        try queryUnlocked(
+            """
+            SELECT bucket_date_local,
+                   source,
+                   SUM(input_tokens),
+                   SUM(output_tokens),
+                   SUM(cached_input_tokens),
+                   SUM(cache_creation_input_tokens),
+                   SUM(reasoning_output_tokens),
+                   SUM(estimated_cost_usd)
+            FROM usage_buckets
+            \(whereClause)
+            GROUP BY bucket_date_local, source
+            ORDER BY bucket_date_local ASC, source ASC;
+            """,
+            bind: { statement in
+                if let startDay {
+                    try bindText(startDay, to: statement, at: 1)
+                }
+            },
+            row: { statement in
+                rows.append(
+                    DailySourceUsage(
+                        day: columnString(statement, 0),
+                        source: columnString(statement, 1),
                         inputTokens: sqlite3_column_int64(statement, 2),
                         outputTokens: sqlite3_column_int64(statement, 3),
                         cachedInputTokens: sqlite3_column_int64(statement, 4),

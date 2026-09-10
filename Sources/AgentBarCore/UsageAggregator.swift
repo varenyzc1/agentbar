@@ -1,6 +1,34 @@
 import Foundation
 
 public enum UsageAggregator {
+    public static func monthlyUsageForYear(
+        days: [DailyUsage],
+        containing date: Date,
+        timeZone: TimeZone
+    ) -> [DailyUsage] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let targetYear = calendar.component(.year, from: date)
+        var usageByMonth: [Int: DailyUsage] = [:]
+
+        for day in days {
+            guard let dayDate = self.date(fromDayString: day.day, timeZone: timeZone) else {
+                continue
+            }
+            let components = calendar.dateComponents([.year, .month], from: dayDate)
+            guard components.year == targetYear, let month = components.month else {
+                continue
+            }
+            let key = String(format: "%04d-%02d-01", targetYear, month)
+            usageByMonth[month] = (usageByMonth[month] ?? DailyUsage(day: key)).merging(day)
+        }
+
+        return (1...12).map { month in
+            let key = String(format: "%04d-%02d-01", targetYear, month)
+            return usageByMonth[month] ?? DailyUsage(day: key)
+        }
+    }
+
     public static func summarize(
         days: [DailyUsage],
         now: Date,

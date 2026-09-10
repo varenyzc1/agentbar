@@ -150,6 +150,84 @@ final class LocalUsageScannerTests: XCTestCase {
         XCTAssertEqual(summary.sourceBreakdown7Days.first?.source, "codex")
     }
 
+    func testScannerBackfillsCodexModelForAppendOnlyTokenRows() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let parser = CodexSessionParser(environment: { [:] }, homeDirectory: home)
+        let scanner = UsageScanner(
+            database: database,
+            parsers: [parser],
+            logger: UsageScannerLogger(logURL: home.appendingPathComponent("scanner.log"))
+        )
+        let session = try writeCodexSession(
+            home: home,
+            lines: [
+                codexMeta(cwd: "/tmp/work/agentbar"),
+                #"{"type":"session_config","payload":{"model":"gpt-5.5"}}"#,
+                codexTokenLine(model: nil, input: 100, output: 40, cached: 20, cacheCreate: 0, reasoning: 10, total: 140)
+            ]
+        )
+
+        _ = try scanner.scan()
+        appendLine(
+            codexTokenLine(model: nil, input: 120, output: 50, cached: 40, cacheCreate: 0, reasoning: 10, total: 170),
+            to: session
+        )
+        _ = try scanner.scan()
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.today.totalTokens, 310)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.model), ["gpt-5.5"])
+    }
+
+    func testScannerRebuildsCachedBucketsWhenParserCacheVersionChanges() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let parser = CodexSessionParser(environment: { [:] }, homeDirectory: home)
+        let timestamp = fixedDate("2026-06-13T10:00:00Z")
+        let session = try writeCodexSession(
+            home: home,
+            lines: [
+                codexMeta(cwd: "/tmp/work/agentbar"),
+                #"{"type":"session_config","payload":{"model":"gpt-5.5"}}"#,
+                codexTokenLine(model: nil, input: 100, output: 40, cached: 20, cacheCreate: 0, reasoning: 10, total: 140)
+            ]
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: session.path)
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        let modifiedAt = (attrs[.modificationDate] as? Date) ?? timestamp
+        let mtimeNS = Int64(modifiedAt.timeIntervalSince1970 * 1_000_000_000)
+
+        _ = try database.ingest(
+            entries: [
+                TokenEntry(source: "codex", model: "unknown", project: "agentbar", timestamp: timestamp, inputTokens: 80, outputTokens: 30, cachedInputTokens: 20, reasoningOutputTokens: 10, dedupKey: "old-unknown")
+            ],
+            strategy: .addDelta,
+            syncedAt: timestamp
+        )
+        try database.upsertScanFile(path: session.path, source: "codex", size: size, mtimeNS: mtimeNS, parserStateJSON: #"{"parsedSize":1}"#)
+
+        let scanner = UsageScanner(
+            database: database,
+            parsers: [parser],
+            logger: UsageScannerLogger(logURL: home.appendingPathComponent("scanner.log"))
+        )
+
+        let result = try scanner.scan()
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(result.scannedFiles, 1)
+        XCTAssertEqual(result.skippedFiles, 0)
+        XCTAssertEqual(summary.today.totalTokens, 140)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.model), ["gpt-5.5"])
+    }
+
     func testDatabaseUsesLongestPricingMatchAndFiveDimensionalTotals() throws {
         let home = temporaryDirectory()
         let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
@@ -186,6 +264,72 @@ final class LocalUsageScannerTests: XCTestCase {
         XCTAssertEqual(summary.dailyModelUsageDays[0].outputTokens, 1_000_000)
         XCTAssertEqual(summary.dailyModelUsageDays[0].cachedInputTokens, 1_000_000)
         XCTAssertEqual(summary.dailyModelUsageDays[0].reasoningOutputTokens, 1_000_000)
+    }
+
+    func testSummaryIncludesDailySourceUsageForRangeFiltering() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let dayOne = fixedDate("2026-06-12T10:00:00Z")
+        let dayTwo = fixedDate("2026-06-13T10:00:00Z")
+        let entries = [
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: dayOne, inputTokens: 100, outputTokens: 50, dedupKey: "codex-1"),
+            TokenEntry(source: "claude-code", model: "claude-sonnet-4-5", project: "agentbar", timestamp: dayOne, inputTokens: 30, outputTokens: 20, dedupKey: "claude-1"),
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: dayTwo, inputTokens: 200, outputTokens: 100, cachedInputTokens: 40, dedupKey: "codex-2")
+        ]
+
+        _ = try database.ingest(entries: entries, strategy: .addDelta, syncedAt: dayTwo)
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.dailySourceUsageDays.map { "\($0.day):\($0.source):\($0.totalTokens)" }, [
+            "2026-06-12:claude-code:50",
+            "2026-06-12:codex:150",
+            "2026-06-13:codex:340"
+        ])
+    }
+
+    func testDailyModelUsageKeepsUnknownModelSoTotalsMatchSourceBreakdown() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let timestamp = fixedDate("2026-06-13T10:00:00Z")
+        let entries = [
+            TokenEntry(source: "codex", model: "gpt-5.5", project: "agentbar", timestamp: timestamp, inputTokens: 100, outputTokens: 50, dedupKey: "known"),
+            TokenEntry(source: "codex", model: "unknown", project: "agentbar", timestamp: timestamp, inputTokens: 200, outputTokens: 20, cachedInputTokens: 500, dedupKey: "unknown")
+        ]
+
+        _ = try database.ingest(entries: entries, strategy: .addDelta, syncedAt: timestamp)
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.dailySourceUsageDays.map(\.totalTokens).reduce(0, +), 870)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.totalTokens).reduce(0, +), 870)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.model), ["gpt-5.5", "unknown"])
+    }
+
+    func testSummaryDailyUsageIncludesOlderHistoryForAllRange() throws {
+        let home = temporaryDirectory()
+        let database = try UsageDatabase(dbURL: home.appendingPathComponent("agentbar.db"))
+        let oldDay = fixedDate("2025-05-01T10:00:00Z")
+        let recentDay = fixedDate("2026-06-13T10:00:00Z")
+        let entries = [
+            TokenEntry(source: "codex", model: "gpt-5-codex", project: "agentbar", timestamp: oldDay, inputTokens: 70, outputTokens: 30, dedupKey: "old-codex"),
+            TokenEntry(source: "claude-code", model: "claude-sonnet-4-5", project: "agentbar", timestamp: recentDay, inputTokens: 100, outputTokens: 50, dedupKey: "recent-claude")
+        ]
+
+        _ = try database.ingest(entries: entries, strategy: .addDelta, syncedAt: recentDay)
+        let summary = try database.usageSummary(
+            now: fixedDate("2026-06-13T12:00:00Z"),
+            settings: AppSettings(timeZoneIdentifier: TimeZone.current.identifier)
+        )
+
+        XCTAssertEqual(summary.dailyUsageDays.first?.day, "2025-05-01")
+        XCTAssertEqual(summary.dailyUsageDays.map(\.totalTokens).reduce(0, +), 250)
+        XCTAssertEqual(summary.dailyModelUsageDays.map(\.totalTokens).reduce(0, +), 250)
+        XCTAssertEqual(summary.dailySourceUsageDays.map(\.totalTokens).reduce(0, +), 250)
     }
 
     func testSettingsStoreWritesSettingsJSON() throws {
