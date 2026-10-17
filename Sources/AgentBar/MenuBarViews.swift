@@ -174,6 +174,16 @@ struct MenuBarPanelView: View {
                     Task { await model.refreshResetCredits() }
                 }
             )
+        case .claudeQuota:
+            ClaudeQuotaCardView(
+                state: model.claudeQuotaState,
+                basis: model.settings.claudeQuotaPercentBasis,
+                quotaItems: model.settings.sanitized.claudeMenuBarQuotaItems,
+                refreshFailureMessage: model.claudeQuotaRefreshFailure,
+                isRefreshing: model.isRefreshingClaudeQuota,
+                language: model.settings.language,
+                onRefresh: { Task { await model.refreshClaudeQuota() } }
+            )
         case .grokQuota:
             GrokQuotaCardView(
                 state: model.grokQuotaState,

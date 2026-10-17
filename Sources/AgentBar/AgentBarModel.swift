@@ -35,6 +35,19 @@ enum GrokQuotaCardState: Equatable {
     case error(String)
 }
 
+enum ClaudeQuotaCardState: Equatable {
+    case loading
+    case ready(ClaudeQuotaSnapshot, isStale: Bool)
+    case error(String)
+}
+
+enum ClaudeEgressIPState: Equatable {
+    case idle
+    case checking
+    case ready(ClaudeEgressIPSnapshot)
+    case error(String)
+}
+
 @MainActor
 final class AgentBarModel: ObservableObject {
     @Published var settings: AppSettings
@@ -51,6 +64,10 @@ final class AgentBarModel: ObservableObject {
     @Published var resetCreditsRefreshFailure: String?
     @Published var grokQuotaState: GrokQuotaCardState = .loading
     @Published var grokQuotaRefreshFailure: String?
+    @Published var claudeQuotaState: ClaudeQuotaCardState = .loading
+    @Published var claudeQuotaRefreshFailure: String?
+    @Published var isRefreshingClaudeQuota = false
+    @Published private(set) var claudeEgressIPState: ClaudeEgressIPState = .idle
 
     private let settingsStore: AppSettingsStore
     private let authLoader: CodexAuthLoader
@@ -61,6 +78,13 @@ final class AgentBarModel: ObservableObject {
     private let grokAuthLoader: GrokAuthLoader
     private let grokQuotaClient: GrokQuotaClient
     private let grokQuotaCacheStore: GrokQuotaCacheStore
+    private let claudeAuthLoader: ClaudeAuthLoader
+    private let claudeQuotaClient: ClaudeQuotaClient
+    private let claudeEgressIPClient: ClaudeEgressIPClient
+    private var claudeEgressIPTask: Task<Void, Never>?
+    private var claudeEgressIPRequestID: UUID?
+    private let claudeQuotaCacheStore: ClaudeQuotaCacheStore
+    private var claudeQuotaCache: ClaudeQuotaCacheRecord?
     private let now: () -> Date
     private let database: UsageDatabase?
     private let scanner: UsageScanner?
@@ -88,6 +112,10 @@ final class AgentBarModel: ObservableObject {
         grokAuthLoader: GrokAuthLoader = GrokAuthLoader(),
         grokQuotaClient: GrokQuotaClient = GrokQuotaClient(),
         grokQuotaCacheStore: GrokQuotaCacheStore = GrokQuotaCacheStore(),
+        claudeAuthLoader: ClaudeAuthLoader = ClaudeAuthLoader(),
+        claudeQuotaClient: ClaudeQuotaClient = ClaudeQuotaClient(),
+        claudeEgressIPClient: ClaudeEgressIPClient = ClaudeEgressIPClient(),
+        claudeQuotaCacheStore: ClaudeQuotaCacheStore = ClaudeQuotaCacheStore(),
         database: UsageDatabase? = try? UsageDatabase(),
         now: @escaping () -> Date = Date.init
     ) {
@@ -100,6 +128,11 @@ final class AgentBarModel: ObservableObject {
         self.grokAuthLoader = grokAuthLoader
         self.grokQuotaClient = grokQuotaClient
         self.grokQuotaCacheStore = grokQuotaCacheStore
+        self.claudeAuthLoader = claudeAuthLoader
+        self.claudeQuotaClient = claudeQuotaClient
+        self.claudeEgressIPClient = claudeEgressIPClient
+        self.claudeQuotaCacheStore = claudeQuotaCacheStore
+        self.claudeQuotaCache = try? claudeQuotaCacheStore.load()
         self.now = now
         self.settings = settingsStore.load()
         self.database = database
@@ -178,6 +211,7 @@ final class AgentBarModel: ObservableObject {
             currentDate: currentDate,
             honorsRefreshInterval: honorsCodexRefreshInterval
         )
+        await refreshClaudeQuota(force: force)
         await refreshResetCredits(updatesStatus: false)
         isRefreshing = false
     }
@@ -365,6 +399,149 @@ final class AgentBarModel: ObservableObject {
 
     func popoverOpened() {
         Task { await refresh(force: false) }
+    }
+
+    func refreshClaudeQuota(force: Bool = true) async {
+        guard !isRefreshingClaudeQuota else { return }
+        isRefreshingClaudeQuota = true
+        defer { isRefreshingClaudeQuota = false }
+        let loader = claudeAuthLoader
+        let auth = await Task.detached(priority: .utility) { loader.load(allowInteraction: force) }.value
+        let credentials: ClaudeCredentials
+        switch auth {
+        case let .credentials(value): credentials = value
+        case .notLoggedIn:
+            setClaudeAuthError("Sign in to Claude Code with claude auth login.")
+            return
+        case .expired:
+            setClaudeAuthError(ClaudeQuotaClientError.tokenExpired.localizedDescription)
+            return
+        case .missingScope:
+            setClaudeAuthError("Claude login lacks usage access. Run claude auth login; setup-token is not sufficient.")
+            return
+        case .keychainAccessRequired:
+            setClaudeAuthError("Allow Keychain access by clicking Refresh Claude quota.")
+            return
+        case .invalid:
+            setClaudeAuthError("Could not read Claude login. Run claude auth login.")
+            return
+        }
+
+        if claudeQuotaCache?.belongs(to: credentials) != true {
+            claudeQuotaCache = ClaudeQuotaCacheRecord(credentialIdentity: credentials.cacheIdentity)
+            claudeQuotaRefreshFailure = nil
+            claudeQuotaState = .loading
+        }
+        guard var record = claudeQuotaCache else { return }
+        let currentDate = now()
+        let interval = TimeInterval(max(60, settings.sanitized.codexRefreshIntervalSeconds))
+        guard record.schedule.allowsRequest(at: currentDate, interval: interval, force: force) else {
+            if let retryAfter = record.schedule.retryAfter, retryAfter > currentDate {
+                claudeQuotaRefreshFailure = ClaudeQuotaClientError.rateLimited(retryAfter: retryAfter).localizedDescription
+            }
+            if !showCachedClaudeQuota(stale: claudeQuotaRefreshFailure != nil), record.snapshot == nil {
+                claudeQuotaState = .error(claudeQuotaRefreshFailure ?? "Waiting for the next Claude quota refresh.")
+            }
+            return
+        }
+        let proxy = settings.claudeProxy
+        record.schedule.recordAttempt(at: currentDate)
+        claudeQuotaCache = record
+        let result: Result<ClaudeQuotaSnapshot, Error>
+        do {
+            result = .success(try await claudeQuotaClient.fetch(credentials: credentials, proxy: proxy))
+        } catch {
+            result = .failure(error)
+        }
+        // Recheck before publishing either new data or a cached result after a failed request.
+        let latestAuth = await Task.detached(priority: .utility) { loader.load() }.value
+        if case let .credentials(latest) = latestAuth, latest.cacheIdentity != credentials.cacheIdentity {
+            setClaudeAuthError("Claude login changed. Refresh Claude quota.")
+            return
+        }
+        if latestAuth == .notLoggedIn || latestAuth == .expired || latestAuth == .missingScope || latestAuth == .invalid {
+            setClaudeAuthError("Claude login changed. Refresh Claude quota.")
+            return
+        }
+        guard settings.claudeProxy == proxy else { return }
+        switch result {
+        case let .success(snapshot):
+            record.snapshot = snapshot
+            record.schedule.recordSuccess()
+            claudeQuotaCache = record
+            claudeQuotaRefreshFailure = nil
+            _ = showCachedClaudeQuota(stale: false)
+        case let .failure(error):
+            let message = PrivacyScrubber.scrub(error.localizedDescription)
+            claudeQuotaRefreshFailure = message
+            if case let ClaudeQuotaClientError.rateLimited(retryAfter) = error {
+                record.schedule.recordRateLimit(at: now(), serverRetryAfter: retryAfter)
+            }
+            if error as? ClaudeQuotaClientError == .tokenExpired || error as? ClaudeQuotaClientError == .forbidden {
+                record.snapshot = nil
+            }
+            claudeQuotaCache = record
+            if !showCachedClaudeQuota(stale: true) { claudeQuotaState = .error(message) }
+        }
+        if let record = claudeQuotaCache { try? claudeQuotaCacheStore.save(record) }
+    }
+
+    @discardableResult
+    func setClaudeProxy(_ proxy: NetworkProxySettings) -> Bool {
+        guard !isRefreshingClaudeQuota else { return false }
+        do {
+            try proxy.validate()
+            var updated = settings
+            updated.claudeProxy = proxy
+            try settingsStore.save(updated.sanitized)
+            settings = updated.sanitized
+            statusMessage = "Settings saved"
+            errorMessage = nil
+            Task { await refreshClaudeQuota(force: true) }
+            return true
+        } catch {
+            errorMessage = PrivacyScrubber.scrub(error.localizedDescription)
+            return false
+        }
+    }
+
+    func detectClaudeEgressIP(proxy: NetworkProxySettings) {
+        clearClaudeEgressIP()
+        let requestID = UUID()
+        claudeEgressIPRequestID = requestID
+        claudeEgressIPState = .checking
+        let client = claudeEgressIPClient
+        claudeEgressIPTask = Task {
+            do {
+                let snapshot = try await client.fetch(proxy: proxy)
+                guard !Task.isCancelled, claudeEgressIPRequestID == requestID else { return }
+                claudeEgressIPState = .ready(snapshot)
+            } catch {
+                guard !Task.isCancelled, claudeEgressIPRequestID == requestID else { return }
+                claudeEgressIPState = .error(PrivacyScrubber.scrub(error.localizedDescription))
+            }
+            claudeEgressIPTask = nil
+        }
+    }
+
+    func clearClaudeEgressIP() {
+        claudeEgressIPTask?.cancel()
+        claudeEgressIPTask = nil
+        claudeEgressIPRequestID = nil
+        claudeEgressIPState = .idle
+    }
+
+    private func setClaudeAuthError(_ message: String) {
+        claudeQuotaState = .error(message)
+        claudeQuotaRefreshFailure = nil
+    }
+
+    @discardableResult
+    private func showCachedClaudeQuota(stale: Bool) -> Bool {
+        guard let snapshot = claudeQuotaCache?.snapshot else { return false }
+        let interval = TimeInterval(max(60, settings.sanitized.codexRefreshIntervalSeconds))
+        claudeQuotaState = .ready(snapshot, isStale: stale || snapshot.isStale(at: now(), interval: interval))
+        return true
     }
 
     func refreshResetCredits() async {
@@ -556,24 +733,32 @@ final class AgentBarModel: ObservableObject {
             let count = snapshot.warningCount
             return count > 0 ? limitedTitle("\(count)⚠") : ""
         case .plan:
-            var parts: [String] = []
+            var groups: [[String]] = []
             if case let .ready(snapshot, _) = quotaState {
-                parts = settings.codexMenuBarQuotaItems
-                    .filter(\.isEnabled)
-                    .compactMap { menuBarPart(for: $0, snapshot: snapshot) }
+                groups.append(MenuBarQuotaPresentation.codexTitles(
+                    items: settings.sanitized.codexMenuBarQuotaItems, snapshot: snapshot,
+                    showsWindowLabel: settings.codexMenuBarShowsQuotaLabels
+                ))
+            }
+            if case let .ready(snapshot, _) = claudeQuotaState {
+                let currentDate = now()
+                groups.append(MenuBarQuotaPresentation.claudeTitles(
+                    items: settings.sanitized.claudeMenuBarQuotaItems, snapshot: snapshot, now: currentDate
+                ))
             }
             if settings.grokMenuBarShowsQuota,
                case let .ready(snapshot, _) = grokQuotaState {
-                parts.append(grokMenuBarPart(snapshot: snapshot))
+                groups.append([grokMenuBarPart(snapshot: snapshot)])
             }
             if settings.codexMenuBarShowsLocalUsage {
-                parts.append(labeledLocalUsageMenuBarTitle)
+                groups.append([labeledLocalUsageMenuBarTitle])
             }
-            guard !parts.isEmpty else {
+            let title = MenuBarQuotaPresentation.title(groups: groups)
+            guard !title.isEmpty else {
                 if case .ready = quotaState { return localUsageMenuBarTitle }
                 return "--"
             }
-            return limitedTitle(parts.joined(separator: " · "))
+            return title
         }
     }
 
@@ -583,6 +768,17 @@ final class AgentBarModel: ObservableObject {
         let todayModel = usageSummary.todayTopModel?.model ?? copy.noModel
         var lines = codexTooltipLines(now: currentDate)
         lines.append(contentsOf: grokTooltipLines(now: currentDate))
+        if case let .ready(snapshot, isStale) = claudeQuotaState {
+            lines.append(snapshot.displayPlan)
+            for window in snapshot.windows {
+                let reset = window.resetsAt.map { AgentBarFormatters.relativeReset(from: currentDate, to: $0, language: settings.language) } ?? "--"
+                lines.append("\(window.key.label): \(AgentBarFormatters.percent(window.usedPercent)) \(copy.used) · \(reset)")
+            }
+            if isStale { lines.append(copy.stale) }
+            if let failure = claudeQuotaRefreshFailure { lines.append(copy.claudeMessage(failure)) }
+        } else if case let .error(message) = claudeQuotaState {
+            lines.append("Claude: \(copy.claudeMessage(message))")
+        }
         lines.append(contentsOf: [
             "\(copy.today)    \(AgentBarFormatters.compactTokens(usageSummary.today.totalTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.today.costUSD)) · \(todayModel)",
             "\(copy.sevenDaysShort)     \(AgentBarFormatters.compactTokens(usageSummary.sevenDayTokens)) tokens · \(AgentBarFormatters.usd(usageSummary.sevenDayCostUSD))",
@@ -760,27 +956,8 @@ final class AgentBarModel: ObservableObject {
         }
     }
 
-    private func menuBarPart(for item: CodexMenuBarQuotaItem, snapshot: CodexQuotaSnapshot) -> String? {
-        guard let window = snapshot.window(for: item.key) else {
-            return nil
-        }
-
-        let percent: String
-        switch item.basis {
-        case .used:
-            percent = AgentBarFormatters.percent(window.usedPercent)
-        case .remaining:
-            percent = AgentBarFormatters.percent(window.remainingPercent)
-        }
-
-        guard settings.codexMenuBarShowsQuotaLabels else {
-            return percent
-        }
-        return "\(item.key.label) \(percent)"
-    }
-
     private func grokMenuBarPart(snapshot: GrokQuotaSnapshot) -> String {
-        "Grok \(AgentBarFormatters.percent(grokQuotaPercent(snapshot)))"
+        settings.grokMenuBarDisplayStyle.title(provider: "Grok", percent: grokQuotaPercent(snapshot))
     }
 
     private func grokQuotaPercent(_ snapshot: GrokQuotaSnapshot) -> Double {

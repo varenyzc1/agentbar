@@ -14,6 +14,16 @@ struct AgentBarCopy {
     var metric: String { text("Metric", "指标") }
     var labels: String { text("Labels", "标签") }
     var grokQuota: String { text("Grok quota", "Grok 额度") }
+    var claudeQuota: String { text("Claude quota", "Claude 额度") }
+    var refreshClaudeQuota: String { text("Refresh Claude quota", "刷新 Claude 额度") }
+    var showClaudeQuotaInMenuBar: String { text("Show Claude quota in the menu bar", "在菜单栏显示 Claude 额度") }
+    var claudeProxy: String { text("Claude proxy", "Claude 代理") }
+    var proxyAddress: String { text("Address", "代理地址") }
+    var applyAndRefresh: String { text("Apply & refresh", "应用并刷新") }
+    var detectClaudeIP: String { text("Check outbound IP", "检测出口 IP") }
+    var detectingClaudeIP: String { text("Checking…", "检测中…") }
+    var claudeOutboundIP: String { text("Outbound IP", "出口 IP") }
+    var claudeIPCheckHint: String { text("Checks api.anthropic.com using the proxy selected above", "使用上方代理检测 api.anthropic.com") }
     var showGrokQuotaInMenuBar: String { text("Show Grok quota in the menu bar", "在菜单栏显示 Grok 额度") }
     var panelModules: String { text("Modules", "模块") }
     var moveUp: String { text("Move up", "上移") }
@@ -121,6 +131,14 @@ struct AgentBarCopy {
         }
     }
 
+    func quotaDisplayStyleTitle(_ style: MenuBarQuotaDisplayStyle) -> String {
+        style == .detailed ? text("Detailed", "详细") : text("Compact", "精简")
+    }
+
+    var quotaDisplayStyleHelp: String {
+        text("Detailed shows the service name in the menu bar; Compact omits it.", "详细在菜单栏显示服务名称，精简省略名称。")
+    }
+
     func languageTitle(_ language: AppLanguage) -> String {
         switch language {
         case .english:
@@ -142,6 +160,8 @@ struct AgentBarCopy {
             return text("Monthly usage this year", "今年各月用量")
         case .codexQuota:
             return text("Codex quota", "Codex 额度")
+        case .claudeQuota:
+            return claudeQuota
         case .grokQuota:
             return text("Grok quota", "Grok 额度")
         case .heatmap:
@@ -153,8 +173,47 @@ struct AgentBarCopy {
         text("Monthly Usage · \(year)", "\(year) 年各月用量")
     }
 
+    func proxyModeTitle(_ mode: NetworkProxyMode) -> String {
+        mode == .system ? text("System", "跟随系统") : text("Manual", "手动代理")
+    }
+
+    func claudeMessage(_ message: String) -> String {
+        guard language == .simplifiedChinese else { return message }
+        switch message {
+        case "Sign in to Claude Code with claude auth login.": return "请运行 claude auth login 登录 Claude Code。"
+        case "Claude login expired. Open Claude Code or run claude auth login.": return "Claude 登录已过期，请打开 Claude Code 或运行 claude auth login。"
+        case "Claude login lacks usage access. Run claude auth login; setup-token is not sufficient.": return "当前登录缺少额度权限，请运行 claude auth login；setup-token 不提供额度权限。"
+        case "Allow Keychain access by clicking Refresh Claude quota.": return "请点击刷新 Claude 额度，并允许访问钥匙串。"
+        case "Could not read Claude login. Run claude auth login.": return "无法读取 Claude 登录，请运行 claude auth login。"
+        case "Claude login changed. Refresh Claude quota.": return "Claude 登录已变更，请刷新额度。"
+        case "Waiting for the next Claude quota refresh.": return "等待下一次 Claude 额度刷新。"
+        case "Invalid Claude quota response.": return "Claude 额度响应无效。"
+        case "This Claude account did not return subscription quota windows.": return "当前 Claude 账号未返回订阅额度窗口。"
+        case "Claude quota access denied. Sign in to Claude Code with subscription usage access.": return "Claude 额度访问被拒绝，请使用有订阅额度权限的账号登录 Claude Code。"
+        case "Claude quota refresh was rate limited. Waiting before retrying.": return "Claude 额度查询已被限流，正在等待重试。"
+        case "Claude quota response was too large.": return "Claude 额度响应过大。"
+        case "Could not connect to Claude. Check the network and proxy settings.": return "无法连接 Claude，请检查网络和代理设置。"
+        case "Claude IP check did not return a valid IP address.": return "Claude 出口检测未返回有效 IP 地址。"
+        case "Could not check Claude's outbound IP. Check the network and proxy settings.": return "无法检测 Claude 出口 IP，请检查网络和代理设置。"
+        case "Enter an HTTP, HTTPS or SOCKS5 proxy address with a valid host and port.": return "请输入含主机和有效端口的 HTTP、HTTPS 或 SOCKS5 代理地址。"
+        case "Proxy addresses with usernames or passwords are not supported.": return "暂不支持含用户名或密码的代理地址。"
+        default:
+            if message.hasPrefix("Claude quota request failed (HTTP ") {
+                return message.replacingOccurrences(of: "Claude quota request failed", with: "Claude 额度请求失败")
+            }
+            if message.hasPrefix("Claude IP check failed (HTTP ") {
+                return message.replacingOccurrences(of: "Claude IP check failed", with: "Claude 出口 IP 检测失败")
+            }
+            return message
+        }
+    }
+
     func quotaLabel(_ key: CodexQuotaKey) -> String {
-        text("\(key.label) quota", "\(key.label) 额度")
+        text("Codex \(key.label) quota", "Codex \(key.label) 额度")
+    }
+
+    func claudeQuotaLabel(_ key: ClaudeQuotaKey) -> String {
+        text("Claude \(key.label) quota", "Claude \(key.label) 额度")
     }
 
     func quotaMeaning(_ key: CodexQuotaKey) -> String {

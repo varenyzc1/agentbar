@@ -54,6 +54,13 @@ public enum CodexQuotaPercentBasis: String, Codable, CaseIterable, Identifiable,
     }
 }
 
+public enum MenuBarQuotaDisplayStyle: String, Codable, CaseIterable, Identifiable, Sendable {
+    case detailed
+    case compact
+
+    public var id: String { rawValue }
+}
+
 public enum AppLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
     case english = "en"
     case simplifiedChinese = "zh-Hans"
@@ -76,6 +83,7 @@ public enum PanelModule: String, Codable, CaseIterable, Identifiable, Sendable {
     case trend
     case yearlyTrend
     case codexQuota
+    case claudeQuota
     case grokQuota
     case heatmap
 
@@ -101,15 +109,30 @@ public struct CodexMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable 
     public var key: CodexQuotaKey
     public var basis: CodexQuotaPercentBasis
     public var isEnabled: Bool
+    public var displayStyle: MenuBarQuotaDisplayStyle
 
     public init(
         key: CodexQuotaKey,
         basis: CodexQuotaPercentBasis = .used,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        displayStyle: MenuBarQuotaDisplayStyle = .compact
     ) {
         self.key = key
         self.basis = basis
         self.isEnabled = isEnabled
+        self.displayStyle = displayStyle
+    }
+
+    enum CodingKeys: String, CodingKey { case key, basis, isEnabled, displayStyle }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            key: try container.decode(CodexQuotaKey.self, forKey: .key),
+            basis: try container.decodeIfPresent(CodexQuotaPercentBasis.self, forKey: .basis) ?? .used,
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            displayStyle: try container.decodeIfPresent(MenuBarQuotaDisplayStyle.self, forKey: .displayStyle) ?? .compact
+        )
     }
 
     public static let supportedKeys: [CodexQuotaKey] = [.fiveHour, .sevenDay]
@@ -120,7 +143,7 @@ public struct CodexMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable 
     ]
 
     public static func normalized(_ items: [CodexMenuBarQuotaItem]) -> [CodexMenuBarQuotaItem] {
-        let byKey = Dictionary(uniqueKeysWithValues: items.map { ($0.key, $0) })
+        let byKey = Dictionary(items.map { ($0.key, $0) }, uniquingKeysWith: { _, last in last })
         return supportedKeys.map { key in
             guard var item = byKey[key] else {
                 return CodexMenuBarQuotaItem(key: key)
@@ -128,6 +151,46 @@ public struct CodexMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable 
             item.key = key
             return item
         }
+    }
+}
+
+public struct ClaudeMenuBarQuotaItem: Codable, Equatable, Identifiable, Sendable {
+    public var id: ClaudeQuotaKey { key }
+    public var key: ClaudeQuotaKey
+    public var basis: CodexQuotaPercentBasis
+    public var isEnabled: Bool
+    public var displayStyle: MenuBarQuotaDisplayStyle
+
+    public init(
+        key: ClaudeQuotaKey,
+        basis: CodexQuotaPercentBasis = .used,
+        isEnabled: Bool = false,
+        displayStyle: MenuBarQuotaDisplayStyle = .detailed
+    ) {
+        self.key = key
+        self.basis = basis
+        self.isEnabled = isEnabled
+        self.displayStyle = displayStyle
+    }
+
+    enum CodingKeys: String, CodingKey { case key, basis, isEnabled, displayStyle }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            key: try container.decode(ClaudeQuotaKey.self, forKey: .key),
+            basis: try container.decodeIfPresent(CodexQuotaPercentBasis.self, forKey: .basis) ?? .used,
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false,
+            displayStyle: try container.decodeIfPresent(MenuBarQuotaDisplayStyle.self, forKey: .displayStyle) ?? .detailed
+        )
+    }
+
+    public static let supportedKeys: [ClaudeQuotaKey] = [.fiveHour, .sevenDay]
+    public static let defaults = supportedKeys.map { ClaudeMenuBarQuotaItem(key: $0) }
+
+    public static func normalized(_ items: [ClaudeMenuBarQuotaItem]) -> [ClaudeMenuBarQuotaItem] {
+        let byKey = Dictionary(items.map { ($0.key, $0) }, uniquingKeysWith: { _, last in last })
+        return supportedKeys.map { byKey[$0] ?? ClaudeMenuBarQuotaItem(key: $0) }
     }
 }
 
@@ -139,6 +202,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var codexMenuBarShowsLocalUsage: Bool
     public var grokQuotaPercentBasis: CodexQuotaPercentBasis
     public var grokMenuBarShowsQuota: Bool
+    public var grokMenuBarDisplayStyle: MenuBarQuotaDisplayStyle
+    public var claudeQuotaPercentBasis: CodexQuotaPercentBasis
+    public var claudeMenuBarQuotaItems: [ClaudeMenuBarQuotaItem]
+    public var claudeProxy: NetworkProxySettings
     public var visiblePanelModules: [PanelModule]
     public var panelModuleLayoutVersion: Int
     public var refreshIntervalMinutes: Int
@@ -163,8 +230,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         codexMenuBarShowsLocalUsage: Bool = false,
         grokQuotaPercentBasis: CodexQuotaPercentBasis = .used,
         grokMenuBarShowsQuota: Bool = false,
+        grokMenuBarDisplayStyle: MenuBarQuotaDisplayStyle = .detailed,
+        claudeQuotaPercentBasis: CodexQuotaPercentBasis = .used,
+        claudeMenuBarQuotaItems: [ClaudeMenuBarQuotaItem] = ClaudeMenuBarQuotaItem.defaults,
+        claudeProxy: NetworkProxySettings = .init(),
         visiblePanelModules: [PanelModule] = PanelModule.defaults,
-        panelModuleLayoutVersion: Int = 1,
+        panelModuleLayoutVersion: Int = 2,
         refreshIntervalMinutes: Int = 30,
         codexRefreshIntervalSeconds: Int = 300,
         monthlyTokenBudget: Int? = nil,
@@ -186,6 +257,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.codexMenuBarShowsLocalUsage = codexMenuBarShowsLocalUsage
         self.grokQuotaPercentBasis = grokQuotaPercentBasis
         self.grokMenuBarShowsQuota = grokMenuBarShowsQuota
+        self.grokMenuBarDisplayStyle = grokMenuBarDisplayStyle
+        self.claudeQuotaPercentBasis = claudeQuotaPercentBasis
+        self.claudeMenuBarQuotaItems = ClaudeMenuBarQuotaItem.normalized(claudeMenuBarQuotaItems)
+        self.claudeProxy = claudeProxy
         self.visiblePanelModules = PanelModule.normalized(visiblePanelModules)
         self.panelModuleLayoutVersion = panelModuleLayoutVersion
         self.refreshIntervalMinutes = refreshIntervalMinutes
@@ -212,8 +287,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.refreshIntervalMinutes = max(5, min(copy.refreshIntervalMinutes, 24 * 60))
         copy.codexRefreshIntervalSeconds = max(30, min(copy.codexRefreshIntervalSeconds, 24 * 60 * 60))
         copy.codexMenuBarQuotaItems = CodexMenuBarQuotaItem.normalized(copy.codexMenuBarQuotaItems)
+        copy.claudeMenuBarQuotaItems = ClaudeMenuBarQuotaItem.normalized(copy.claudeMenuBarQuotaItems)
         copy.visiblePanelModules = PanelModule.normalized(copy.visiblePanelModules)
-        copy.panelModuleLayoutVersion = max(1, copy.panelModuleLayoutVersion)
+        copy.panelModuleLayoutVersion = max(2, copy.panelModuleLayoutVersion)
         copy.projectIDs = copy.projectIDs.cleanedIdentifiers()
         copy.apiKeyIDs = copy.apiKeyIDs.cleanedIdentifiers()
         copy.modelIDs = copy.modelIDs.cleanedIdentifiers()
@@ -237,6 +313,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case codexMenuBarShowsLocalUsage
         case grokQuotaPercentBasis
         case grokMenuBarShowsQuota
+        case grokMenuBarDisplayStyle
+        case claudeQuotaPercentBasis
+        case claudeMenuBarQuotaItems
+        case claudeProxy
         case visiblePanelModules
         case panelModuleLayoutVersion
         case refreshIntervalMinutes
@@ -254,8 +334,21 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case language
     }
 
+    private enum LegacyCodingKeys: String, CodingKey { case claudeMenuBarShowsQuota }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        let claudeBasis = try container.decodeIfPresent(CodexQuotaPercentBasis.self, forKey: .claudeQuotaPercentBasis) ?? .used
+        let claudeItems: [ClaudeMenuBarQuotaItem]
+        if let storedItems = try container.decodeIfPresent([ClaudeMenuBarQuotaItem].self, forKey: .claudeMenuBarQuotaItems) {
+            claudeItems = storedItems
+        } else {
+            let wasEnabled = try legacy.decodeIfPresent(Bool.self, forKey: .claudeMenuBarShowsQuota) ?? false
+            claudeItems = ClaudeMenuBarQuotaItem.supportedKeys.map {
+                ClaudeMenuBarQuotaItem(key: $0, basis: claudeBasis, isEnabled: wasEnabled)
+            }
+        }
         let storedLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .panelModuleLayoutVersion) ?? 0
         var visiblePanelModules = try container.decodeIfPresent([PanelModule].self, forKey: .visiblePanelModules)
             ?? PanelModule.defaults
@@ -263,6 +356,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
             let insertionIndex = visiblePanelModules.firstIndex(of: .trend).map { $0 + 1 }
                 ?? visiblePanelModules.endIndex
             visiblePanelModules.insert(.yearlyTrend, at: insertionIndex)
+        }
+        if storedLayoutVersion < 2, !visiblePanelModules.contains(.claudeQuota),
+           let index = visiblePanelModules.firstIndex(of: .codexQuota) ?? visiblePanelModules.firstIndex(of: .grokQuota) {
+            visiblePanelModules.insert(.claudeQuota, at: index + 1)
         }
         self.init(
             menuBarMetric: try container.decodeIfPresent(MenuBarMetric.self, forKey: .menuBarMetric) ?? .usedTokens,
@@ -272,8 +369,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
             codexMenuBarShowsLocalUsage: try container.decodeIfPresent(Bool.self, forKey: .codexMenuBarShowsLocalUsage) ?? false,
             grokQuotaPercentBasis: try container.decodeIfPresent(CodexQuotaPercentBasis.self, forKey: .grokQuotaPercentBasis) ?? .used,
             grokMenuBarShowsQuota: try container.decodeIfPresent(Bool.self, forKey: .grokMenuBarShowsQuota) ?? false,
+            grokMenuBarDisplayStyle: try container.decodeIfPresent(MenuBarQuotaDisplayStyle.self, forKey: .grokMenuBarDisplayStyle) ?? .detailed,
+            claudeQuotaPercentBasis: claudeBasis,
+            claudeMenuBarQuotaItems: claudeItems,
+            claudeProxy: try container.decodeIfPresent(NetworkProxySettings.self, forKey: .claudeProxy) ?? .init(),
             visiblePanelModules: visiblePanelModules,
-            panelModuleLayoutVersion: max(1, storedLayoutVersion),
+            panelModuleLayoutVersion: max(2, storedLayoutVersion),
             refreshIntervalMinutes: try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 30,
             codexRefreshIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .codexRefreshIntervalSeconds) ?? 300,
             monthlyTokenBudget: try container.decodeIfPresent(Int.self, forKey: .monthlyTokenBudget),
@@ -337,6 +438,7 @@ public struct AppSettingsStore {
     }
 
     public func save(_ settings: AppSettings) throws {
+        try settings.claudeProxy.validate()
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true

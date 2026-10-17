@@ -92,6 +92,20 @@ AgentBar reads local usage files produced by supported coding assistants, parses
 
 Quota information is separate from local usage totals. When available, AgentBar refreshes quota state over the network and caches it locally so the menu bar remains useful between refreshes.
 
+In **Settings → Menu Bar**, Codex and Claude each have separate **5h** and **7d** controls for visibility, used/remaining percentages, and **Detailed / Compact** labels. Detailed includes the service name (for example `Claude 5h 25%`); Compact omits it (`5h 25%`). Grok also supports Detailed / Compact labels. Existing Claude display settings migrate to both windows.
+
+The menu bar shows each service name only once, at its first visible Detailed item. Windows for the same service are separated by spaces; services are separated by `·`, for example `Codex 5h 25% 7d 40% · Claude 5h 25% 7d 40%`.
+
+### Claude subscription quota
+
+Sign in with `claude auth login`, then click **Refresh Claude quota** in AgentBar and allow macOS Keychain access if prompted. AgentBar reads Claude Code's existing OAuth login and displays 5-hour, weekly, and any returned Sonnet/Opus weekly limits. It does not rotate or overwrite Claude Code credentials; if the login expires, open Claude Code or sign in again, then refresh. API keys and inference-only `claude setup-token` credentials do not provide subscription quota access.
+
+Claude requests follow the macOS system proxy by default. In **Settings → Claude proxy**, choose **Manual**, enter an HTTP, HTTPS, or SOCKS5 address including its port (for example `http://127.0.0.1:7890`), and click **Apply & refresh**. This setting applies only to Claude quota requests and outbound IP checks. Proxy authentication in the address is not supported, and a failed manual proxy never falls back to a direct connection. Claude refreshes no more frequently than once per minute automatically; rate-limit cooldowns also apply to manual refreshes.
+
+**Check outbound IP** tests the proxy currently selected in the form, even before applying it. It requests `https://api.anthropic.com/cdn-cgi/trace` using the same network configuration as quota requests and displays the IPv4 or IPv6 address observed by that host at the time of the check. It requires no login, sends no OAuth credentials, and does not save the IP. Changing the proxy clears the result. This diagnostic endpoint may change; a successful IP check does not verify quota access.
+
+The OAuth usage endpoint is not a documented public API and may change. Cached quota is bound to the current credential; expired windows wait for a new measurement rather than assuming a full reset.
+
 ## Privacy
 
 AgentBar is designed around local scanning and local storage. It does not need a server to calculate local usage summaries.
@@ -99,6 +113,8 @@ AgentBar is designed around local scanning and local storage. It does not need a
 Network access is used for:
 
 - Codex quota refreshes, when configured.
+- Claude subscription quota refreshes using the existing Claude Code login, when available.
+- Claude outbound IP checks, only when you click the check button.
 - GitHub release checks for updates.
 - Homebrew updates, when you choose to update a Homebrew-installed app.
 

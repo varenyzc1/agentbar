@@ -331,7 +331,7 @@ final class CodexQuotaTests: XCTestCase {
         let migrated = try JSONDecoder().decode(AppSettings.self, from: Data(legacy.utf8))
 
         XCTAssertEqual(migrated.visiblePanelModules, [.summary, .trend, .yearlyTrend, .heatmap])
-        XCTAssertEqual(migrated.panelModuleLayoutVersion, 1)
+        XCTAssertEqual(migrated.panelModuleLayoutVersion, 2)
 
         var hidden = migrated
         hidden.visiblePanelModules.removeAll { $0 == .yearlyTrend }

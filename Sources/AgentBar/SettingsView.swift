@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var refreshIntervalSeconds = "300"
     @State private var monthlyTokenBudget = ""
     @State private var monthlyCostBudget = ""
+    @State private var claudeProxyMode: NetworkProxyMode = .system
+    @State private var claudeProxyAddress = ""
     @State private var autosaveTask: Task<Void, Never>?
     @State private var draggedPanelModule: PanelModule?
     @State private var draggedPanelModuleStartIndex: Int?
@@ -27,6 +29,10 @@ struct SettingsView: View {
 
                 compactSection(copy.panelModules) {
                     panelModuleControls
+                }
+
+                compactSection(copy.claudeProxy) {
+                    claudeProxyControls
                 }
 
                 HStack(alignment: .top, spacing: 12) {
@@ -171,7 +177,11 @@ struct SettingsView: View {
         }
         .onDisappear {
             autosaveTask?.cancel()
+            model.clearClaudeEgressIP()
             saveSettingsFromFields()
+        }
+        .onChange(of: draftClaudeProxy) {
+            model.clearClaudeEgressIP()
         }
         .onChange(of: refreshIntervalSeconds) {
             scheduleSettingsAutosave()
@@ -318,9 +328,85 @@ struct SettingsView: View {
         )
     }
 
+    private var grokDisplayStyleBinding: Binding<MenuBarQuotaDisplayStyle> {
+        Binding(
+            get: { model.settings.grokMenuBarDisplayStyle },
+            set: { model.settings.grokMenuBarDisplayStyle = $0; model.persistSettings() }
+        )
+    }
+
+    private var draftClaudeProxy: NetworkProxySettings {
+        claudeProxyMode == .system ? .init() : NetworkProxySettings(
+            mode: .manual, address: claudeProxyAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private var claudeProxyValidationError: String? {
+        do {
+            try draftClaudeProxy.validate()
+            return nil
+        } catch { return copy.claudeMessage(error.localizedDescription) }
+    }
+
+    private var claudeProxyControls: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            settingRow(copy.claudeProxy, labelWidth: 82) {
+                AgentBarSegmentedPicker(options: NetworkProxyMode.allCases, selection: $claudeProxyMode, title: copy.proxyModeTitle)
+                    .frame(width: 200)
+                    .accessibilityLabel(copy.claudeProxy)
+            }
+            if claudeProxyMode == .manual {
+                settingRow(copy.proxyAddress, labelWidth: 82) {
+                    TextField("http://127.0.0.1:7890", text: $claudeProxyAddress)
+                        .textFieldStyle(AgentBarTextFieldStyle())
+                        .accessibilityLabel(copy.proxyAddress)
+                }
+            }
+            HStack {
+                if let message = claudeProxyValidationError {
+                    Text(message).font(.caption2).foregroundStyle(AgentBarStyle.red)
+                } else if draftClaudeProxy != model.settings.claudeProxy {
+                    Text(language == .simplifiedChinese ? "尚未应用" : "Not applied").font(.caption2).agentBarSecondaryText()
+                }
+                Spacer()
+                Button(model.claudeEgressIPState == .checking ? copy.detectingClaudeIP : copy.detectClaudeIP) {
+                    model.detectClaudeEgressIP(proxy: draftClaudeProxy)
+                }
+                .buttonStyle(AgentBarCommandButtonStyle())
+                .disabled(claudeProxyValidationError != nil || model.claudeEgressIPState == .checking)
+                Button(copy.applyAndRefresh) { _ = model.setClaudeProxy(draftClaudeProxy) }
+                    .buttonStyle(AgentBarCommandButtonStyle())
+                    .disabled(claudeProxyValidationError != nil || model.isRefreshingClaudeQuota)
+            }
+            switch model.claudeEgressIPState {
+            case let .ready(snapshot):
+                settingRow(copy.claudeOutboundIP, labelWidth: 82) {
+                    Text(snapshot.ipAddress)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Text(snapshot.checkedAt, style: .time)
+                        .font(.caption2)
+                        .agentBarSecondaryText()
+                }
+            case let .error(message):
+                Text(copy.claudeMessage(message))
+                    .font(.caption2)
+                    .foregroundStyle(AgentBarStyle.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .idle, .checking:
+                EmptyView()
+            }
+            Text(copy.claudeIPCheckHint)
+                .font(.caption2)
+                .agentBarSecondaryText()
+        }
+    }
+
     private var menuBarControls: some View {
         VStack(alignment: .leading, spacing: 9) {
-            settingRow(copy.display, labelWidth: 82) {
+            settingRow(copy.display, labelWidth: 100) {
                 AgentBarSegmentedPicker(
                     options: CodexMenuBarMode.allCases,
                     selection: menuBarModeBinding,
@@ -330,7 +416,7 @@ struct SettingsView: View {
             }
 
             if model.settings.codexMenuBarMode == .iconOnly {
-                settingRow(copy.metric, labelWidth: 82) {
+                settingRow(copy.metric, labelWidth: 100) {
                     AgentBarSegmentedPicker(
                         options: MenuBarMetric.allCases,
                         selection: menuBarMetricBinding,
@@ -341,7 +427,7 @@ struct SettingsView: View {
             }
 
             if model.settings.codexMenuBarMode == .plan {
-                settingRow(copy.labels, labelWidth: 82) {
+                settingRow(copy.labels, labelWidth: 100) {
                     Button {
                         showQuotaLabelsBinding.wrappedValue.toggle()
                     } label: {
@@ -349,50 +435,30 @@ struct SettingsView: View {
                     }
                     .fixedSize()
                     .buttonStyle(.plain)
-                    Text(language == .simplifiedChinese ? "显示 5h / 7d" : "Show 5h / 7d")
+                    Text(language == .simplifiedChinese ? "显示 Codex 5h / 7d" : "Show Codex 5h / 7d")
                         .agentBarSecondaryText()
                 }
 
                 ForEach(CodexMenuBarQuotaItem.supportedKeys) { key in
-                    settingRow(copy.quotaLabel(key), labelWidth: 82) {
-                        Button {
-                            enabledBinding(for: key).wrappedValue.toggle()
-                        } label: {
-                            AgentBarCheckbox(isOn: enabledBinding(for: key).wrappedValue)
-                        }
-                        .fixedSize()
-                        .buttonStyle(.plain)
-
-                        AgentBarSegmentedPicker(
-                            options: CodexQuotaPercentBasis.allCases,
-                            selection: basisBinding(for: key),
-                            title: copy.quotaBasisTitle
-                        )
-                        .frame(width: 154, alignment: .leading)
-                        .disabled(!quotaItem(for: key).isEnabled)
-                    }
-                }
-
-                settingRow(copy.grokQuota, labelWidth: 82) {
-                    Button {
-                        showGrokQuotaBinding.wrappedValue.toggle()
-                    } label: {
-                        AgentBarCheckbox(isOn: showGrokQuotaBinding.wrappedValue)
-                    }
-                    .fixedSize()
-                    .buttonStyle(.plain)
-                    .help(copy.showGrokQuotaInMenuBar)
-                    .accessibilityLabel(copy.showGrokQuotaInMenuBar)
-
-                    AgentBarSegmentedPicker(
-                        options: CodexQuotaPercentBasis.allCases,
-                        selection: grokQuotaBasisBinding,
-                        title: copy.quotaBasisTitle
+                    quotaMenuBarSettingRow(
+                        copy.quotaLabel(key), isEnabled: enabledBinding(for: key),
+                        basis: basisBinding(for: key), displayStyle: displayStyleBinding(for: key)
                     )
-                    .frame(width: 154, alignment: .leading)
                 }
 
-                settingRow(copy.usage, labelWidth: 82) {
+                ForEach(ClaudeMenuBarQuotaItem.supportedKeys) { key in
+                    quotaMenuBarSettingRow(
+                        copy.claudeQuotaLabel(key), isEnabled: claudeEnabledBinding(for: key),
+                        basis: claudeBasisBinding(for: key), displayStyle: claudeDisplayStyleBinding(for: key)
+                    )
+                }
+
+                quotaMenuBarSettingRow(
+                    copy.grokQuota, isEnabled: showGrokQuotaBinding,
+                    basis: grokQuotaBasisBinding, displayStyle: grokDisplayStyleBinding
+                )
+
+                settingRow(copy.usage, labelWidth: 100) {
                     Button {
                         showLocalUsageBinding.wrappedValue.toggle()
                     } label: {
@@ -410,7 +476,7 @@ struct SettingsView: View {
                     .disabled(!showLocalUsageBinding.wrappedValue)
                 }
 
-                settingRow(copy.languageLabel, labelWidth: 82) {
+                settingRow(copy.languageLabel, labelWidth: 100) {
                     AgentBarSegmentedPicker(
                         options: AppLanguage.allCases,
                         selection: languageBinding,
@@ -428,6 +494,33 @@ struct SettingsView: View {
             ForEach(orderedPanelModules) { module in
                 panelModuleOrderRow(for: module)
             }
+        }
+    }
+
+    private func quotaMenuBarSettingRow(
+        _ title: String, isEnabled: Binding<Bool>, basis: Binding<CodexQuotaPercentBasis>,
+        displayStyle: Binding<MenuBarQuotaDisplayStyle>
+    ) -> some View {
+        settingRow(title, labelWidth: 100) {
+            Button { isEnabled.wrappedValue.toggle() } label: {
+                AgentBarCheckbox(isOn: isEnabled.wrappedValue)
+            }
+            .fixedSize()
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            AgentBarSegmentedPicker(
+                options: CodexQuotaPercentBasis.allCases, selection: basis, title: copy.quotaBasisTitle
+            )
+            .frame(width: 154)
+            .disabled(!isEnabled.wrappedValue)
+            .accessibilityLabel(title + " · " + copy.quotaBasisTitle(basis.wrappedValue))
+            AgentBarSegmentedPicker(
+                options: MenuBarQuotaDisplayStyle.allCases, selection: displayStyle, title: copy.quotaDisplayStyleTitle
+            )
+            .frame(width: 144)
+            .disabled(!isEnabled.wrappedValue)
+            .help(copy.quotaDisplayStyleHelp)
+            .accessibilityLabel(title + " · " + copy.quotaDisplayStyleTitle(displayStyle.wrappedValue))
         }
     }
 
@@ -691,6 +784,38 @@ struct SettingsView: View {
         )
     }
 
+    private func displayStyleBinding(for key: CodexQuotaKey) -> Binding<MenuBarQuotaDisplayStyle> {
+        Binding(
+            get: { quotaItem(for: key).displayStyle },
+            set: { style in updateQuotaItem(for: key) { $0.displayStyle = style } }
+        )
+    }
+
+    private func claudeQuotaItem(for key: ClaudeQuotaKey) -> ClaudeMenuBarQuotaItem {
+        model.settings.claudeMenuBarQuotaItems.first { $0.key == key } ?? ClaudeMenuBarQuotaItem(key: key)
+    }
+
+    private func claudeEnabledBinding(for key: ClaudeQuotaKey) -> Binding<Bool> {
+        Binding(
+            get: { claudeQuotaItem(for: key).isEnabled },
+            set: { enabled in updateClaudeQuotaItem(for: key) { $0.isEnabled = enabled } }
+        )
+    }
+
+    private func claudeBasisBinding(for key: ClaudeQuotaKey) -> Binding<CodexQuotaPercentBasis> {
+        Binding(
+            get: { claudeQuotaItem(for: key).basis },
+            set: { basis in updateClaudeQuotaItem(for: key) { $0.basis = basis } }
+        )
+    }
+
+    private func claudeDisplayStyleBinding(for key: ClaudeQuotaKey) -> Binding<MenuBarQuotaDisplayStyle> {
+        Binding(
+            get: { claudeQuotaItem(for: key).displayStyle },
+            set: { style in updateClaudeQuotaItem(for: key) { $0.displayStyle = style } }
+        )
+    }
+
     private func moduleVisibilityBinding(for module: PanelModule) -> Binding<Bool> {
         Binding(
             get: { model.settings.visiblePanelModules.contains(module) },
@@ -750,6 +875,8 @@ struct SettingsView: View {
         refreshIntervalSeconds = String(model.settings.codexRefreshIntervalSeconds)
         monthlyTokenBudget = model.settings.monthlyTokenBudget.map(String.init) ?? ""
         monthlyCostBudget = model.settings.monthlyCostBudgetUSD.map { String(format: "%.2f", $0) } ?? ""
+        claudeProxyMode = model.settings.claudeProxy.mode
+        claudeProxyAddress = model.settings.claudeProxy.address
     }
 
     private func saveSettingsFromFields() {
@@ -797,6 +924,17 @@ struct SettingsView: View {
         guard let index = items.firstIndex(where: { $0.key == key }) else { return }
         update(&items[index])
         model.settings.codexMenuBarQuotaItems = items
+        model.persistSettings()
+    }
+
+    private func updateClaudeQuotaItem(
+        for key: ClaudeQuotaKey,
+        update: (inout ClaudeMenuBarQuotaItem) -> Void
+    ) {
+        var items = ClaudeMenuBarQuotaItem.normalized(model.settings.claudeMenuBarQuotaItems)
+        guard let index = items.firstIndex(where: { $0.key == key }) else { return }
+        update(&items[index])
+        model.settings.claudeMenuBarQuotaItems = items
         model.persistSettings()
     }
 
