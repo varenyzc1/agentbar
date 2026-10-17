@@ -15,11 +15,14 @@ struct AgentBarCopy {
     var labels: String { text("Labels", "标签") }
     var grokQuota: String { text("Grok quota", "Grok 额度") }
     var claudeQuota: String { text("Claude quota", "Claude 额度") }
-    var refreshClaudeQuota: String { text("Refresh Claude quota", "刷新 Claude 额度") }
+    var refreshClaudeQuota: String { text("Query Claude quota online", "网络补查 Claude 额度") }
+    var waitingForClaudeLocal: String { text("Waiting for local quota data. Use Claude Code to update it.", "等待本地额度数据，使用 Claude Code 后自动更新。") }
+    var claudeLocalCollection: String { text("Local collection", "本地采集") }
+    var claudeLocalMode: String { text("Local first · Online queries are manual", "本地优先 · 网络仅手动补查") }
     var showClaudeQuotaInMenuBar: String { text("Show Claude quota in the menu bar", "在菜单栏显示 Claude 额度") }
     var claudeProxy: String { text("Claude proxy", "Claude 代理") }
     var proxyAddress: String { text("Address", "代理地址") }
-    var applyAndRefresh: String { text("Apply & refresh", "应用并刷新") }
+    var applyAndRefresh: String { text("Apply proxy", "应用代理") }
     var detectClaudeIP: String { text("Check outbound IP", "检测出口 IP") }
     var detectingClaudeIP: String { text("Checking…", "检测中…") }
     var claudeOutboundIP: String { text("Outbound IP", "出口 IP") }
@@ -183,7 +186,11 @@ struct AgentBarCopy {
         case "Sign in to Claude Code with claude auth login.": return "请运行 claude auth login 登录 Claude Code。"
         case "Claude login expired. Open Claude Code or run claude auth login.": return "Claude 登录已过期，请打开 Claude Code 或运行 claude auth login。"
         case "Claude login lacks usage access. Run claude auth login; setup-token is not sufficient.": return "当前登录缺少额度权限，请运行 claude auth login；setup-token 不提供额度权限。"
-        case "Allow Keychain access by clicking Refresh Claude quota.": return "请点击刷新 Claude 额度，并允许访问钥匙串。"
+        case "Allow Keychain access by clicking Refresh Claude quota.": return "请点击网络补查，并允许访问钥匙串。"
+        case "Could not configure Claude local collection.": return "无法设置 Claude 本地采集。"
+        case "Could not read Claude status line settings.": return "无法读取 Claude 状态栏设置。"
+        case "Claude status line settings changed. Re-enable local collection.": return "Claude 状态栏设置已变更，请重新启用本地采集。"
+        case "Claude local collector is missing. Rebuild or reinstall AgentBar.": return "缺少本地采集程序，请重新构建或安装 AgentBar。"
         case "Could not read Claude login. Run claude auth login.": return "无法读取 Claude 登录，请运行 claude auth login。"
         case "Claude login changed. Refresh Claude quota.": return "Claude 登录已变更，请刷新额度。"
         case "Waiting for the next Claude quota refresh.": return "等待下一次 Claude 额度刷新。"

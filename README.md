@@ -98,9 +98,13 @@ The menu bar shows each service name only once, at its first visible Detailed it
 
 ### Claude subscription quota
 
-Sign in with `claude auth login`, then click **Refresh Claude quota** in AgentBar and allow macOS Keychain access if prompted. AgentBar reads Claude Code's existing OAuth login and displays 5-hour, weekly, and any returned Sonnet/Opus weekly limits. It does not rotate or overwrite Claude Code credentials; if the login expires, open Claude Code or sign in again, then refresh. API keys and inference-only `claude setup-token` credentials do not provide subscription quota access.
+Claude quota uses Claude Code's documented `statusLine` data by default. In **Settings → Claude quota**, click **Enable**, then use Claude Code normally; subscription quota fields usually appear after an API response. AgentBar wraps the existing status line command while preserving its input, output, and other settings. **Disable** restores the original configuration. The collector ships in the app bundle and can also be installed with `swift run AgentBarStatusline install`.
 
-Claude requests follow the macOS system proxy by default. In **Settings → Claude proxy**, choose **Manual**, enter an HTTP, HTTPS, or SOCKS5 address including its port (for example `http://127.0.0.1:7890`), and click **Apply & refresh**. This setting applies only to Claude quota requests and outbound IP checks. Proxy authentication in the address is not supported, and a failed manual proxy never falls back to a direct connection. Claude refreshes no more frequently than once per minute automatically; rate-limit cooldowns also apply to manual refreshes.
+The collector saves only quota windows, reset times, observation times, and digests for session/account isolation under `agentbar-statusline/` in the Claude configuration directory. AgentBar checks this local data every 5 seconds without Claude quota requests or Keychain reads. Idle sessions show cached data; repainting an unchanged status line does not renew its age, and expired windows never imply a full quota reset.
+
+Click **Query online** for an explicit fresh lookup or any returned Sonnet/Opus weekly limits. Only this action reads Claude Code's existing OAuth credentials and requests the usage endpoint; it may prompt for Keychain access and respects existing 429 cooldowns. AgentBar never rotates or overwrites credentials. Run `claude auth login` if the login expires. Ordinary scans, refreshes, and saving a proxy do not trigger online lookups.
+
+Claude requests follow the macOS system proxy by default. In **Settings → Claude proxy**, choose **Manual**, enter an HTTP, HTTPS, or SOCKS5 address including its port (for example `http://127.0.0.1:7890`), and click **Apply proxy**. This setting applies only to Claude quota requests and outbound IP checks. Proxy authentication in the address is not supported, and a failed manual proxy never falls back to a direct connection. Claude quota network queries run only when explicitly requested.
 
 **Check outbound IP** tests the proxy currently selected in the form, even before applying it. It requests `https://api.anthropic.com/cdn-cgi/trace` using the same network configuration as quota requests and displays the IPv4 or IPv6 address observed by that host at the time of the check. It requires no login, sends no OAuth credentials, and does not save the IP. Changing the proxy clears the result. This diagnostic endpoint may change; a successful IP check does not verify quota access.
 
@@ -113,7 +117,7 @@ AgentBar is designed around local scanning and local storage. It does not need a
 Network access is used for:
 
 - Codex quota refreshes, when configured.
-- Claude subscription quota refreshes using the existing Claude Code login, when available.
+- Manual Claude quota lookups using the existing Claude Code login.
 - Claude outbound IP checks, only when you click the check button.
 - GitHub release checks for updates.
 - Homebrew updates, when you choose to update a Homebrew-installed app.

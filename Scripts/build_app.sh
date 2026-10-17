@@ -21,10 +21,12 @@ fi
 
 cd "$ROOT_DIR"
 swift build -c release --product "$APP_NAME"
+swift build -c release --product AgentBarStatusline
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+cp "$BUILD_DIR/AgentBarStatusline" "$MACOS_DIR/AgentBarStatusline"
 cp "$ROOT_DIR/Sources/AgentBar/Resources/AgentBar.icns" "$RESOURCES_DIR/AgentBar.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST

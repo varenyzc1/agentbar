@@ -98,9 +98,13 @@ AgentBar 会读取支持的编程助手在本地生成的使用记录，从中�
 
 ### Claude 订阅额度
 
-运行 `claude auth login` 登录后，在 AgentBar 中点击“刷新 Claude 额度”，并按 macOS 提示允许钥匙串访问。AgentBar 读取 Claude Code 现有的 OAuth 登录，显示 5 小时、每周额度，以及接口返回的 Sonnet／Opus 每周额度。应用不会轮换或覆盖 Claude Code 凭据；登录过期时，打开 Claude Code 或重新登录后再刷新。API key 和仅用于推理的 `claude setup-token` 凭据不提供订阅额度权限。
+默认从 Claude Code 的官方 `statusLine` 数据获取 5 小时和每周额度。在“设置 → Claude 额度”点击“启用采集”，再正常使用 Claude Code；订阅额度字段通常在收到 API 响应后出现。AgentBar 会包装现有状态栏命令，保留其输入、输出和其他配置；点击“停用采集”可恢复原设置。采集程序随应用打包，也可用 `swift run AgentBarStatusline install` 安装。
 
-Claude 请求默认跟随 macOS 系统代理。在“设置 → Claude 代理”中选择“手动代理”，填写含端口的 HTTP、HTTPS 或 SOCKS5 地址（例如 `http://127.0.0.1:7890`），点击“应用并刷新”。该设置只影响 Claude 额度请求和出口 IP 检测。暂不支持在地址中填写代理用户名或密码；手动代理失败时不会回退为直连。Claude 自动查询间隔最短为一分钟，手动刷新也会遵守限流冷却时间。
+采集仅保存额度、重置时间、采集时间及用于隔离会话／账号的摘要，文件位于 Claude 配置目录的 `agentbar-statusline/`。AgentBar 每 5 秒检查本地数据，不发起 Claude 额度请求、不读取钥匙串。无新响应时显示缓存；状态栏重复重绘不会延长数据的新鲜度，过期窗口不会假定恢复满额。
+
+需要主动获取最新数据或 Sonnet／Opus 专属周额度时，点击“网络补查”。只有此操作会读取 Claude Code 的 OAuth 凭据并访问额度接口，可能需要钥匙串授权，并遵守已有的 429 冷却策略。应用不会轮换或覆盖凭据；登录过期时运行 `claude auth login`。普通扫描、刷新和保存代理均不会触发网络补查。
+
+Claude 请求默认跟随 macOS 系统代理。在“设置 → Claude 代理”中选择“手动代理”，填写含端口的 HTTP、HTTPS 或 SOCKS5 地址（例如 `http://127.0.0.1:7890`），点击“应用代理”。该设置只影响 Claude 额度请求和出口 IP 检测。暂不支持在地址中填写代理用户名或密码；手动代理失败时不会回退为直连。Claude 网络额度查询仅在手动补查时执行。
 
 “检测出口 IP”会使用表单中当前选择的代理，可在应用设置前先测试。检测通过与额度查询相同的网络配置访问 `https://api.anthropic.com/cdn-cgi/trace`，显示该域名在检测时看到的 IPv4 或 IPv6 出口地址。无需登录，不发送 OAuth 凭据，不保存 IP；修改代理后清除旧结果。该诊断接口可能变化，检测成功不代表额度查询已获授权。
 
@@ -113,7 +117,7 @@ AgentBar 以本地扫描和本地存储为基础，不需要服务器来计算�
 会用到网络的场景包括：
 
 - 配置后刷新 Codex 配额。
-- 存在 Claude Code 登录时，通过该登录刷新 Claude 订阅额度。
+- 点击“网络补查”时，通过 Claude Code 登录查询 Claude 订阅额度。
 - 点击检测按钮时，查询 Claude 出口 IP。
 - 检查 GitHub Releases 中的新版本。
 - 当你选择更新 Homebrew 安装的应用时，执行 Homebrew 更新。

@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "AgentBar", targets: ["AgentBar"]),
+        .executable(name: "AgentBarStatusline", targets: ["AgentBarStatusline"]),
         .library(name: "AgentBarCore", targets: ["AgentBarCore"])
     ],
     targets: [
@@ -26,6 +27,8 @@ let package = Package(
         .testTarget(
             name: "AgentBarCoreTests",
             dependencies: ["AgentBarCore"]
-        )
+        ),
+        .executableTarget(name: "AgentBarStatusline", dependencies: ["AgentBarCore"]),
+        .testTarget(name: "AgentBarTests", dependencies: ["AgentBar"])
     ]
 )

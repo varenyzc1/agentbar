@@ -21,7 +21,7 @@ struct ClaudeQuotaCardView: View {
                     Text(title).font(.headline)
                     Spacer()
                     Button(action: onRefresh) {
-                        Image(systemName: "arrow.clockwise")
+                        Image(systemName: "network")
                     }
                     .buttonStyle(AgentBarIconButtonStyle())
                     .help(copy.refreshClaudeQuota)
@@ -31,6 +31,8 @@ struct ClaudeQuotaCardView: View {
                 switch state {
                 case .loading:
                     Text(copy.refreshingQuota).font(.callout).agentBarSecondaryText()
+                case .waitingForLocal:
+                    Text(copy.waitingForClaudeLocal).font(.callout).agentBarSecondaryText()
                 case let .error(message):
                     Text(copy.claudeMessage(message))
                         .font(.callout)
@@ -41,7 +43,8 @@ struct ClaudeQuotaCardView: View {
                         windowRow(window, now: context.date)
                     }
                     let expired = snapshot.windows.contains { $0.isExpired(at: context.date) }
-                    Text((isStale || expired ? text("Cached", "缓存于") : text("Updated", "更新于"))
+                    Text((snapshot.source == .statusline ? text("Local · ", "本地 · ") : text("Online · ", "网络 · "))
+                        + (isStale || expired ? text("Cached", "缓存于") : text("Updated", "采集于"))
                         + " " + snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))
                         .font(.caption2)
                         .agentBarSecondaryText()
@@ -64,7 +67,7 @@ struct ClaudeQuotaCardView: View {
 
     private var statusColor: Color {
         switch state {
-        case .loading: return AgentBarStyle.secondaryText(colorScheme)
+        case .loading, .waitingForLocal: return AgentBarStyle.secondaryText(colorScheme)
         case .error: return AgentBarStyle.yellow
         case let .ready(snapshot, isStale):
             if isStale { return AgentBarStyle.secondaryText(colorScheme) }

@@ -31,6 +31,30 @@ struct SettingsView: View {
                     panelModuleControls
                 }
 
+                compactSection(copy.claudeQuota) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack {
+                            Text(copy.claudeLocalCollection).font(.caption.weight(.medium)).agentBarSecondaryText()
+                            Text(model.claudeStatuslineInstalled ? (language == .simplifiedChinese ? "已启用" : "Enabled") : (language == .simplifiedChinese ? "未启用" : "Not enabled"))
+                                .font(.caption2).agentBarSecondaryText()
+                            Spacer()
+                            Button(model.claudeStatuslineInstalled ? (language == .simplifiedChinese ? "停用采集" : "Disable") : (language == .simplifiedChinese ? "启用采集" : "Enable")) {
+                                model.setClaudeLocalCollection(enabled: !model.claudeStatuslineInstalled)
+                            }
+                            .buttonStyle(AgentBarCommandButtonStyle())
+                            Button(language == .simplifiedChinese ? "网络补查" : "Query online") {
+                                Task { await model.queryClaudeQuotaOnline() }
+                            }
+                            .buttonStyle(AgentBarCommandButtonStyle())
+                            .disabled(model.isRefreshingClaudeQuota)
+                        }
+                        Text(copy.claudeLocalMode).font(.caption2).agentBarSecondaryText()
+                        if let message = model.claudeStatuslineSetupError {
+                            Text(copy.claudeMessage(message)).font(.caption2).foregroundStyle(AgentBarStyle.red)
+                        }
+                    }
+                }
+
                 compactSection(copy.claudeProxy) {
                     claudeProxyControls
                 }

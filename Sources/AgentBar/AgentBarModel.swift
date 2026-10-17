@@ -37,6 +37,7 @@ enum GrokQuotaCardState: Equatable {
 
 enum ClaudeQuotaCardState: Equatable {
     case loading
+    case waitingForLocal
     case ready(ClaudeQuotaSnapshot, isStale: Bool)
     case error(String)
 }
@@ -67,6 +68,8 @@ final class AgentBarModel: ObservableObject {
     @Published var claudeQuotaState: ClaudeQuotaCardState = .loading
     @Published var claudeQuotaRefreshFailure: String?
     @Published var isRefreshingClaudeQuota = false
+    @Published private(set) var claudeStatuslineInstalled = false
+    @Published private(set) var claudeStatuslineSetupError: String?
     @Published private(set) var claudeEgressIPState: ClaudeEgressIPState = .idle
 
     private let settingsStore: AppSettingsStore
@@ -85,6 +88,10 @@ final class AgentBarModel: ObservableObject {
     private var claudeEgressIPRequestID: UUID?
     private let claudeQuotaCacheStore: ClaudeQuotaCacheStore
     private var claudeQuotaCache: ClaudeQuotaCacheRecord?
+    private let claudeStatuslineStore: ClaudeStatuslineStore
+    private var claudeLocalLoop: Task<Void, Never>?
+    private var lastManualClaudeSnapshot: ClaudeQuotaSnapshot?
+    private var lastManualClaudeAccount: String?
     private let now: () -> Date
     private let database: UsageDatabase?
     private let scanner: UsageScanner?
@@ -116,7 +123,9 @@ final class AgentBarModel: ObservableObject {
         claudeQuotaClient: ClaudeQuotaClient = ClaudeQuotaClient(),
         claudeEgressIPClient: ClaudeEgressIPClient = ClaudeEgressIPClient(),
         claudeQuotaCacheStore: ClaudeQuotaCacheStore = ClaudeQuotaCacheStore(),
+        claudeStatuslineStore: ClaudeStatuslineStore = ClaudeStatuslineStore(),
         database: UsageDatabase? = try? UsageDatabase(),
+        startsBackgroundTasks: Bool = true,
         now: @escaping () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
@@ -133,6 +142,7 @@ final class AgentBarModel: ObservableObject {
         self.claudeEgressIPClient = claudeEgressIPClient
         self.claudeQuotaCacheStore = claudeQuotaCacheStore
         self.claudeQuotaCache = try? claudeQuotaCacheStore.load()
+        self.claudeStatuslineStore = claudeStatuslineStore
         self.now = now
         self.settings = settingsStore.load()
         self.database = database
@@ -153,15 +163,25 @@ final class AgentBarModel: ObservableObject {
         loadCachedCodexQuota()
         loadCachedResetCredits()
         loadCachedGrokQuota()
-        scheduleRefresh()
-        scheduleStartupLocalUsageScan()
-        Task { await refreshInstallMethod() }
-        Task { await refresh(force: false, scansLocalUsage: false) }
+        claudeStatuslineInstalled = ClaudeStatuslineInstaller(store: claudeStatuslineStore).isInstalled
+        if startsBackgroundTasks {
+            scheduleRefresh()
+            scheduleStartupLocalUsageScan()
+            Task { await refreshInstallMethod() }
+            Task { await refresh(force: false, scansLocalUsage: false) }
+            claudeLocalLoop = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refreshClaudeQuotaLocally()
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+            }
+        }
     }
 
     deinit {
         refreshLoop?.cancel()
         startupLocalUsageScanTask?.cancel()
+        claudeLocalLoop?.cancel()
     }
 
     func persistSettings() {
@@ -211,7 +231,7 @@ final class AgentBarModel: ObservableObject {
             currentDate: currentDate,
             honorsRefreshInterval: honorsCodexRefreshInterval
         )
-        await refreshClaudeQuota(force: force)
+        await refreshClaudeQuotaLocally()
         await refreshResetCredits(updatesStatus: false)
         isRefreshing = false
     }
@@ -401,12 +421,56 @@ final class AgentBarModel: ObservableObject {
         Task { await refresh(force: false) }
     }
 
-    func refreshClaudeQuota(force: Bool = true) async {
+    func refreshClaudeQuotaLocally() async {
+        guard !isRefreshingClaudeQuota else { return }
+        let store = claudeStatuslineStore
+        let currentDate = now()
+        let result = await Task.detached(priority: .utility) {
+            (store.loadLatest(now: currentDate), store.accountIdentity, ClaudeStatuslineInstaller(store: store).isInstalled)
+        }.value
+        guard !isRefreshingClaudeQuota else { return }
+        claudeStatuslineInstalled = result.2
+        if lastManualClaudeAccount != result.1 { lastManualClaudeSnapshot = nil }
+        let candidates = [result.0, lastManualClaudeSnapshot].compactMap { $0 }
+        guard let snapshot = candidates.max(by: { $0.fetchedAt < $1.fetchedAt }) else {
+            if case .error = claudeQuotaState { return }
+            claudeQuotaState = .waitingForLocal
+            claudeQuotaRefreshFailure = nil
+            return
+        }
+        if snapshot.source == .statusline {
+            if case let .ready(previous, _) = claudeQuotaState, previous == snapshot {} else {
+                claudeQuotaRefreshFailure = nil
+            }
+        }
+        claudeQuotaState = .ready(snapshot, isStale: snapshot.isStale(at: currentDate, interval: 300))
+    }
+
+    func setClaudeLocalCollection(enabled: Bool) {
+        do {
+            let installer = ClaudeStatuslineInstaller(store: claudeStatuslineStore)
+            if enabled {
+                let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/AgentBarStatusline")
+                try installer.install(helper: helper)
+            } else {
+                try installer.uninstall()
+            }
+            claudeStatuslineInstalled = installer.isInstalled
+            claudeStatuslineSetupError = nil
+        } catch {
+            claudeStatuslineSetupError = PrivacyScrubber.scrub((error as? ClaudeStatuslineError)?.localizedDescription ?? "Could not configure Claude local collection.")
+        }
+    }
+
+    /// The only Claude quota path allowed to read credentials or use the network.
+    func queryClaudeQuotaOnline() async {
+        guard !isRefreshingClaudeQuota else { return }
+        await refreshClaudeQuotaLocally()
         guard !isRefreshingClaudeQuota else { return }
         isRefreshingClaudeQuota = true
         defer { isRefreshingClaudeQuota = false }
         let loader = claudeAuthLoader
-        let auth = await Task.detached(priority: .utility) { loader.load(allowInteraction: force) }.value
+        let auth = await Task.detached(priority: .utility) { loader.load(allowInteraction: true) }.value
         let credentials: ClaudeCredentials
         switch auth {
         case let .credentials(value): credentials = value
@@ -430,15 +494,18 @@ final class AgentBarModel: ObservableObject {
         if claudeQuotaCache?.belongs(to: credentials) != true {
             claudeQuotaCache = ClaudeQuotaCacheRecord(credentialIdentity: credentials.cacheIdentity)
             claudeQuotaRefreshFailure = nil
-            claudeQuotaState = .loading
+            if case let .ready(snapshot, _) = claudeQuotaState, snapshot.source == .statusline {} else {
+                claudeQuotaState = .loading
+            }
         }
         guard var record = claudeQuotaCache else { return }
         let currentDate = now()
         let interval = TimeInterval(max(60, settings.sanitized.codexRefreshIntervalSeconds))
-        guard record.schedule.allowsRequest(at: currentDate, interval: interval, force: force) else {
+        guard record.schedule.allowsRequest(at: currentDate, interval: interval, force: true) else {
             if let retryAfter = record.schedule.retryAfter, retryAfter > currentDate {
                 claudeQuotaRefreshFailure = ClaudeQuotaClientError.rateLimited(retryAfter: retryAfter).localizedDescription
             }
+            if case .ready = claudeQuotaState { return }
             if !showCachedClaudeQuota(stale: claudeQuotaRefreshFailure != nil), record.snapshot == nil {
                 claudeQuotaState = .error(claudeQuotaRefreshFailure ?? "Waiting for the next Claude quota refresh.")
             }
@@ -497,7 +564,6 @@ final class AgentBarModel: ObservableObject {
             settings = updated.sanitized
             statusMessage = "Settings saved"
             errorMessage = nil
-            Task { await refreshClaudeQuota(force: true) }
             return true
         } catch {
             errorMessage = PrivacyScrubber.scrub(error.localizedDescription)
@@ -532,13 +598,25 @@ final class AgentBarModel: ObservableObject {
     }
 
     private func setClaudeAuthError(_ message: String) {
+        lastManualClaudeSnapshot = nil
+        if case let .ready(snapshot, _) = claudeQuotaState, snapshot.source == .statusline {
+            claudeQuotaRefreshFailure = message
+            return
+        }
         claudeQuotaState = .error(message)
         claudeQuotaRefreshFailure = nil
     }
 
     @discardableResult
     private func showCachedClaudeQuota(stale: Bool) -> Bool {
-        guard let snapshot = claudeQuotaCache?.snapshot else { return false }
+        guard let snapshot = claudeQuotaCache?.snapshot else {
+            if case let .ready(local, _) = claudeQuotaState, local.source == .statusline { return true }
+            return false
+        }
+        lastManualClaudeSnapshot = snapshot
+        lastManualClaudeAccount = claudeStatuslineStore.accountIdentity
+        if case let .ready(local, _) = claudeQuotaState, local.source == .statusline,
+           (stale || local.fetchedAt > snapshot.fetchedAt) { return true }
         let interval = TimeInterval(max(60, settings.sanitized.codexRefreshIntervalSeconds))
         claudeQuotaState = .ready(snapshot, isStale: stale || snapshot.isStale(at: now(), interval: interval))
         return true

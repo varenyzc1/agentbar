@@ -10,7 +10,9 @@ Swift Package targets：
 
 - `AgentBar`：macOS SwiftUI 应用、菜单栏 UI、设置页、安装来源检测和更新 UI。
 - `AgentBarCore`：扫描、解析、存储、价格、聚合、Codex 配额和认证逻辑。
+- `AgentBarStatusline`：读取 Claude Code 状态栏输入，仅将必要额度字段写入本地缓存的采集程序。
 - `AgentBarCoreTests`：核心逻辑测试。
+- `AgentBarTests`：应用状态和本地／网络额度刷新边界测试。
 
 最低要求：
 

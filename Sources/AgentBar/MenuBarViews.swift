@@ -182,7 +182,7 @@ struct MenuBarPanelView: View {
                 refreshFailureMessage: model.claudeQuotaRefreshFailure,
                 isRefreshing: model.isRefreshingClaudeQuota,
                 language: model.settings.language,
-                onRefresh: { Task { await model.refreshClaudeQuota() } }
+                onRefresh: { Task { await model.queryClaudeQuotaOnline() } }
             )
         case .grokQuota:
             GrokQuotaCardView(

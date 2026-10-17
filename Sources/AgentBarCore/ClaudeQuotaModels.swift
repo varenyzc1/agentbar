@@ -36,15 +36,32 @@ public struct ClaudeQuotaWindow: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum ClaudeQuotaSource: String, Codable, Sendable {
+    case oauth
+    case statusline
+}
+
 public struct ClaudeQuotaSnapshot: Codable, Equatable, Sendable {
     public let windows: [ClaudeQuotaWindow]
     public let plan: String?
     public let fetchedAt: Date
+    public let source: ClaudeQuotaSource
 
-    public init(windows: [ClaudeQuotaWindow], plan: String?, fetchedAt: Date) {
+    public init(windows: [ClaudeQuotaWindow], plan: String?, fetchedAt: Date, source: ClaudeQuotaSource = .oauth) {
         self.windows = windows
         self.plan = plan
         self.fetchedAt = fetchedAt
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey { case windows, plan, fetchedAt, source }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(windows: try container.decode([ClaudeQuotaWindow].self, forKey: .windows),
+                  plan: try container.decodeIfPresent(String.self, forKey: .plan),
+                  fetchedAt: try container.decode(Date.self, forKey: .fetchedAt),
+                  source: try container.decodeIfPresent(ClaudeQuotaSource.self, forKey: .source) ?? .oauth)
     }
 
     public var displayPlan: String {
