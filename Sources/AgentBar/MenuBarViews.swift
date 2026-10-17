@@ -659,7 +659,7 @@ struct CodexQuotaCardView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var redactsAccountEmail = false
-    @State private var hidesResetCredits = false
+    @State private var hidesResetCredits = true
     private var copy: AgentBarCopy {
         AgentBarCopy(language: language)
     }
